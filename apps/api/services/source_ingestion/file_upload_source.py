@@ -1,12 +1,12 @@
-import logging
-from typing import Callable, Optional, Dict, Any
 import asyncio
-import httpx
+import logging
+import os
+import tempfile
+from typing import Callable, Optional, Dict, Any
 
 from .base import BaseConnector, IngestionError
 from ..local_storage import download_content, download_content_bytes
-import os
-import tempfile
+from fastapi import HTTPException
 
 try:
     from markitdown import MarkItDown
@@ -25,6 +25,7 @@ class FileUploadConnector(BaseConnector):
     ) -> str:
         if on_progress:
             try:
+                on_progress("file_ingestion_started", {"path": url})
                 on_progress("source_files_found", {
                     "source": url,
                     "file_count": 1
@@ -57,10 +58,15 @@ class FileUploadConnector(BaseConnector):
             else:
                 content = await asyncio.to_thread(download_content, url)
         except Exception as e:
-            raise IngestionError(f"Error processing uploaded file: {str(e)}")
+            logger.error(f"Error processing uploaded file at {url}: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error processing uploaded file: {str(e)}"
+            )
 
         if on_progress:
             try:
+                on_progress("file_ingestion_complete", {"path": url, "chars": len(content)})
                 on_progress("source_files_fetched", {
                     "source": url,
                     "fetched": 1,
@@ -71,8 +77,13 @@ class FileUploadConnector(BaseConnector):
 
         return content
 
-async def process_uploaded_file(gcs_path: str, config: Optional[Dict[str, Any]] = None) -> str:
-    async with httpx.AsyncClient() as client:
-        connector = FileUploadConnector(client)
-        return await connector.ingest(gcs_path, None, config=config)
-
+async def process_uploaded_file(
+    gcs_path: str,
+    token: Optional[str] = None,
+    config: Optional[Dict[str, Any]] = None,
+    on_progress: Optional[Callable[[str, Dict[str, Any]], Any]] = None
+) -> str:
+    connector = FileUploadConnector()
+    if config is not None:
+        return await connector.ingest(gcs_path, token, config=config, on_progress=on_progress)
+    return await connector.ingest(gcs_path, token, on_progress=on_progress)
