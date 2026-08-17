@@ -1,0 +1,16 @@
+node_modules/
+packages/
+ref_code/
+demo-codebase/
+.env
+.env.example
+logdir/
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+dist/
+build/
+*.pyc
+__pycache__/
