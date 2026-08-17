@@ -1,11 +1,12 @@
 import asyncio
 import base64
 import logging
-from typing import Callable, Optional
+from typing import Callable, Optional, Dict, Any
 
 import httpx
 
 from ...core.config import settings
+from .base import BaseConnector, IngestionError, IngestionAuthError, IngestionRateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -70,39 +71,43 @@ def _prioritise_files(paths: list) -> list:
     return sorted_paths[:cap]
 
 
-async def fetch_github_repo(
-    repo_url: str,
-    github_token: str,
-    on_progress: Optional[Callable[[str, dict], None]] = None,
-) -> str:
-    """Async, semaphore-limited GitHub repository ingestion.
+class GitHubConnector(BaseConnector):
+    async def ingest(
+        self,
+        url: str,
+        token: Optional[str],
+        on_progress: Optional[Callable[[str, Dict[str, Any]], Any]] = None
+    ) -> str:
+        parts = url.rstrip('/').split('/')
+        if len(parts) < 2:
+            raise IngestionError("Invalid GitHub repository URL")
+        owner, repo = parts[-2], parts[-1]
 
-    Fetches up to LOCAL_MAX_FILES (local/hybrid) or 500 (remote) files
-    concurrently with a semaphore of 10 to respect GitHub rate limits.
-    Files are prioritised by type (source > config > docs).
-    """
-    parts = repo_url.rstrip('/').split('/')
-    owner, repo = parts[-2], parts[-1]
+        use_token = bool(token) and not token.startswith("ghp_dummy")
+        auth_headers = {'Accept': 'application/vnd.github.v3+json'}
+        if use_token:
+            auth_headers['Authorization'] = f'token {token}'
 
-    use_token = bool(github_token) and not github_token.startswith("ghp_dummy")
-    auth_headers = {'Accept': 'application/vnd.github.v3+json'}
-    if use_token:
-        auth_headers['Authorization'] = f'token {github_token}'
+        base_api_url = f"https://api.github.com/repos/{owner}/{repo}"
+        logger.info(f"Connecting to GitHub repository: {owner}/{repo}")
 
-    base_api_url = f"https://api.github.com/repos/{owner}/{repo}"
-    logger.info(f"Connecting to GitHub repository: {owner}/{repo}")
-
-    async with httpx.AsyncClient(headers=auth_headers, timeout=30.0) as client:
         # ── Resolve default branch ────────────────────────────────────────
         default_branch = "main"
         try:
-            r = await client.get(base_api_url)
+            r = await self.client.get(base_api_url, headers=auth_headers)
             if r.status_code == 401 and use_token:
-                # Token rejected — fall back to public access
-                client.headers.pop('Authorization', None)
-                r = await client.get(base_api_url)
-            if r.status_code == 200:
+                # Token rejected — fall back to public access or raise IngestionAuthError
+                auth_headers.pop('Authorization', None)
+                r = await self.client.get(base_api_url, headers=auth_headers)
+            
+            if r.status_code in (401, 403):
+                raise IngestionAuthError(f"GitHub authentication failed: {r.text}")
+            elif r.status_code == 429:
+                raise IngestionRateLimitError("GitHub rate limit exceeded")
+            elif r.status_code == 200:
                 default_branch = r.json().get('default_branch', 'main')
+        except (IngestionAuthError, IngestionRateLimitError):
+            raise
         except Exception as e:
             logger.warning(f"Could not resolve default branch for {owner}/{repo}: {e}")
 
@@ -110,7 +115,7 @@ async def fetch_github_repo(
         tree_data = []
         for branch in [default_branch, 'main', 'master']:
             try:
-                r = await client.get(f"{base_api_url}/git/trees/{branch}?recursive=1")
+                r = await self.client.get(f"{base_api_url}/git/trees/{branch}?recursive=1", headers=auth_headers)
                 if r.status_code == 200:
                     tree_data = r.json().get('tree', [])
                     break
@@ -118,14 +123,14 @@ async def fetch_github_repo(
                 continue
 
         if not tree_data:
-            return f"[Error: could not fetch tree for {owner}/{repo}]"
+            raise IngestionError(f"Could not fetch tree for {owner}/{repo}")
 
         # ── Filter and prioritise files ───────────────────────────────────
         candidate_paths = []
         for item in tree_data:
-            if item['type'] != 'blob':
+            if item.get('type') != 'blob':
                 continue
-            path = item['path']
+            path = item.get('path', '')
             filename = path.split('/')[-1]
             if filename in JUNK_FILENAMES:
                 continue
@@ -141,21 +146,23 @@ async def fetch_github_repo(
         )
 
         if on_progress:
-            on_progress("source_files_found", {
-                "source": repo_url,
-                "owner": owner,
-                "repo": repo,
-                "file_count": len(files_to_process),
-            })
+            try:
+                on_progress("source_files_found", {
+                    "source": url,
+                    "owner": owner,
+                    "repo": repo,
+                    "file_count": len(files_to_process),
+                })
+            except Exception:
+                pass
 
         # ── Concurrent file fetch with semaphore ──────────────────────────
-        sem = asyncio.Semaphore(10)
         results: dict[str, str] = {}
 
         async def _fetch_file(path: str) -> None:
-            async with sem:
+            async with self.semaphore:
                 try:
-                    r = await client.get(f"{base_api_url}/contents/{path}")
+                    r = await self.client.get(f"{base_api_url}/contents/{path}", headers=auth_headers)
                     if r.status_code == 200:
                         file_data = r.json()
                         if 'content' in file_data:
@@ -165,9 +172,13 @@ async def fetch_github_repo(
                             results[path] = raw
                         else:
                             results[path] = "[Binary or unreadable content]"
+                    elif r.status_code in (401, 403):
+                        results[path] = "[Auth/Access error]"
+                    else:
+                        results[path] = f"[Fetch error: {r.status_code}]"
                 except Exception as e:
                     logger.debug(f"Skipped {path}: {e}")
-                    results[path] = "[Fetch error]"
+                    results[path] = "[Fetch exception]"
 
         await asyncio.gather(*[_fetch_file(p) for p in files_to_process])
 
@@ -178,11 +189,14 @@ async def fetch_github_repo(
         )
 
         if on_progress:
-            on_progress("source_files_fetched", {
-                "source": repo_url,
-                "fetched": len(results),
-                "total": len(files_to_process),
-            })
+            try:
+                on_progress("source_files_fetched", {
+                    "source": url,
+                    "fetched": len(results),
+                    "total": len(files_to_process),
+                })
+            except Exception:
+                pass
 
         # ── Build ordered content string ──────────────────────────────────
         content = ""
@@ -191,3 +205,13 @@ async def fetch_github_repo(
                 content += f"\n\n--- FILE: {path} ---\n{results[path]}"
 
         return content
+
+
+async def fetch_github_repo(
+    repo_url: str,
+    github_token: str,
+    on_progress: Optional[Callable[[str, dict], None]] = None,
+) -> str:
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        connector = GitHubConnector(client, concurrency_limit=10)
+        return await connector.ingest(repo_url, github_token, on_progress=on_progress)
