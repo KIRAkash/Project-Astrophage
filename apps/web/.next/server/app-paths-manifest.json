@@ -1,5 +1,0 @@
-{
-  "/_not-found/page": "app/_not-found/page.js",
-  "/kb/[kbId]/explore/page": "app/kb/[kbId]/explore/page.js",
-  "/kb/[kbId]/page": "app/kb/[kbId]/page.js"
-}

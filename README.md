@@ -11,7 +11,7 @@
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js)](https://nextjs.org)
-[![Gemini](https://img.shields.io/badge/Gemini-3.7%20Flash-4285F4?style=flat-square&logo=google)](https://deepmind.google/technologies/gemini)
+[![Gemini](https://img.shields.io/badge/Gemini-Flash-4285F4?style=flat-square&logo=google)](https://deepmind.google/technologies/gemini)
 [![Ollama](https://img.shields.io/badge/Ollama-Gemma%203-white?style=flat-square)](https://ollama.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple?style=flat-square)](LICENSE)
 
@@ -40,7 +40,7 @@ The result is a **continuously maintained, version-controlled, peer-reviewed arc
 - 🤝 **Human-in-the-loop by design** — AI proposes, humans approve. The merge is the publishing event.
 - 🏢 **Scales with your org** — Supports unlimited nesting of teams and sub-teams, each with their own KB, all rolling up into a master organizational view.
 - 🛡️ **Intelligent spam filter** — The Gatekeeper agent ensures trivial changes (typo fixes, color tweaks) never pollute your documentation history.
-- 💰 **Cost-conscious AI** — Expensive Gemini calls only for complex reasoning; local Gemma handles high-frequency diff classification for free.
+- 💰 **Three AI modes** — Run fully remote (Gemini), fully local (Gemma/Ollama, free), or hybrid (smart per-task routing to balance quality and cost).
 
 ---
 
@@ -54,7 +54,7 @@ User submits App (Team + App Name + Source URLs)
          ▼
   ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
   │   INGESTOR      │───▶│    COMPILER      │───▶│    GITOPS       │
-  │  (Gemini Flash) │    │  (Gemini Flash)  │    │  (PyGitHub)     │
+  │  (mode-aware)   │    │  (mode-aware)    │    │  (PyGitHub)     │
   │                 │    │                  │    │                 │
   │ · GitHub repos  │    │ · index.md       │    │ · Creates repo  │
   │ · Confluence    │    │ · summaries/     │    │ · Feature branch│
@@ -80,7 +80,8 @@ Engineer pushes commit to source repo
          ▼
   ┌──────────────────────────────────────────────┐
   │                 GATEKEEPER                   │
-  │          (Gemma 3, runs locally for free)    │
+  │     (Gemma locally in local/hybrid mode,     │
+  │      Gemini in remote mode)                  │
   │                                              │
   │  Analyses the exact code diff:               │
   │                                              │
@@ -105,7 +106,7 @@ Any app KB is merged (transitions to "In Orbit")
          ▼
   ┌──────────────────┐
   │   ROLLUP AGENT   │  Reads all published app KBs, identifies shared
-  │  (Gemini Flash)  │  dependencies, resolves contradictions, builds
+  │  (always Gemini) │  dependencies, resolves contradictions, builds
   │                  │  the cross-team architecture map
   └────────┬─────────┘
            │
@@ -119,12 +120,58 @@ Any app KB is merged (transitions to "In Orbit")
 
 ## 🤖 The AI Agent Fleet
 
-| Agent | Model | Role |
+| Agent | File | Role |
 |---|---|---|
-| **The Ingestor** | Gemini 3.7 Flash | Securely parses code ASTs, reads external docs, strips secrets and noise, outputs structured Markdown summaries |
-| **The Compiler** | Gemini 3.7 Flash | Synthesizes ingested data into the full OpenKB directory structure with Obsidian-compatible `[[wikilinks]]` |
-| **The Gatekeeper** | Gemma 3 (Ollama, local) | High-frequency diff classifier — acts as a spam filter to block trivial changes from triggering doc updates |
-| **The Rollup Agent** | Gemini 3.7 Flash | Synthesizes multiple app-level KBs into a single organizational architecture map, resolving contradictions |
+| **Ingestor** | [`agents/ingestor.py`](apps/api/agents/ingestor.py) | Fetches source code and docs, runs mode-aware map-reduce summarisation to produce an architecture index |
+| **Compiler** | [`agents/compiler.py`](apps/api/agents/compiler.py) | Synthesizes the architecture index into a full OpenKB directory using a wikilink-aware page manifest; routes pages to local or remote model in hybrid mode |
+| **Gatekeeper** | [`agents/gatekeeper.py`](apps/api/agents/gatekeeper.py) | Classifies git diffs as `significant` or `trivial`; runs locally (Gemma) in local/hybrid mode to keep the cost of continuous monitoring near zero |
+| **Rollup** | [`agents/rollup.py`](apps/api/agents/rollup.py) | Synthesises multiple app-level KBs into a single org-level architecture map; always uses Gemini regardless of AI_MODE (needs the widest context window) |
+| **LLM Client** | [`agents/llm_client.py`](apps/api/agents/llm_client.py) | Shared singleton for all agents — wraps `google-genai` (Gemini) and Ollama (Gemma) with connection pooling, retries, semaphore-bounded batching, and `force_mode` routing |
+
+---
+
+## 🧠 AI Modes
+
+Astrophage supports three modes, configurable via `AI_MODE` in your `.env`:
+
+### `remote` (default)
+All LLM calls go to **Gemini Flash** via the `google-genai` SDK. For small repos (under `REMOTE_INLINE_THRESHOLD` chars), the entire codebase is sent in a single Gemini context window — no map-reduce needed. For larger repos, map and reduce both run on Gemini with concurrent calls bounded by a semaphore.
+
+### `local`
+All LLM calls go to **Gemma via Ollama** — fully free, fully offline. The ingestor uses smaller chunks (`LOCAL_CHUNK_SIZE=6000` chars) with sequential, rolling-context summarisation to stay within Gemma's context limit. The compiler caps the documentation plan at `LOCAL_MAX_PAGES=6` and uses a tight per-page code budget. Wikilink repair after compilation is done with pure Python regex (no extra LLM call).
+
+### `hybrid`
+Smart per-task routing that balances cost and quality:
+
+| Task | Routes to | Why |
+|---|---|---|
+| File summarisation (MAP phase) | 🏠 Gemma | Cheap, embarrassingly parallel — ideal for local |
+| Architecture synthesis (REDUCE phase) | ☁️ Gemini | Needs to see all summaries at once with full context |
+| `summaries/` and `entities/` pages | 🏠 Gemma | Narrow, code-grounded — low context need |
+| `concepts/` and `decisions/` pages | ☁️ Gemini | Cross-cutting, architecture-level reasoning |
+| Gatekeeper (diff classification) | 🏠 Gemma | Binary decision on a compact diff — free |
+| Rollup | ☁️ Gemini | Must synthesise across multiple full KBs |
+| Post-compilation synthesis pass | ☁️ Gemini | Cross-links all pages in one pass |
+
+The routing is driven by the `_route_page(path)` function in the compiler, which reads `HYBRID_LOCAL_CATEGORIES` and `HYBRID_REMOTE_CATEGORIES` from config.
+
+---
+
+## 🔗 Wikilink-Aware Compilation
+
+Every compiled KB page contains accurate `[[wikilinks]]` to other pages from the moment it is generated — no post-processing hallucinations. Here's how:
+
+1. After the documentation **plan** is generated (step 2), a **page manifest** is built at zero LLM cost:
+   ```
+   [[index]] - High-level architecture overview
+   [[summaries/api-spec]] - REST API endpoints and schemas
+   [[entities/user]] - User entity model
+   [[decisions/db-choice]] - Database technology selection
+   ```
+2. This manifest is **injected into every page's compilation prompt**, so the model knows exactly what other pages exist and what they cover.
+3. A **synthesis pass** runs after all pages are compiled:
+   - In `local` mode: pure Python regex removes any links to non-existent pages.
+   - In `remote`/`hybrid` mode: a single Gemini call reviews all page previews and adds missing cross-references.
 
 ---
 
@@ -134,7 +181,7 @@ Every generated knowledge base follows the **Google OKF (Open Knowledge Format)*
 
 ```
 kb-[org-slug]-[app-name]/
-├── index.md                  # Architecture overview + table of contents
+├── index.md                  # Architecture overview + navigation table
 ├── summaries/
 │   ├── api-spec.md           # All endpoints, auth, request/response schemas
 │   ├── db-schema.md          # Tables, relationships, indexes
@@ -150,7 +197,7 @@ kb-[org-slug]-[app-name]/
     └── adr-001-initial.md    # Initial Architecture Decision Record
 ```
 
-All cross-references use relative `[[wikilinks]]` so the entire KB is navigable in Obsidian or any Markdown editor.
+All cross-references use `[[wikilinks]]` so the entire KB is navigable in Obsidian or any Markdown viewer.
 
 ---
 
@@ -166,12 +213,12 @@ All cross-references use relative `[[wikilinks]]` so the entire KB is navigable 
 │  │                  │    │  ┌───────────┐  ┌─────────────────┐  │   │
 │  │  · Dashboard     │    │  │  Routers  │  │  Agent Runner   │  │   │
 │  │  · Org Tree      │    │  │  /orgs    │  │                 │  │   │
-│  │  · KB Detail     │    │  │  /kb      │  │  Ingestor  ────▶│  │   │
-│  │  · Live SSE      │    │  │  /webhook │  │  Compiler  ────▶│  │   │
-│  └──────────────────┘    │  └───────────┘  │  Gatekeeper ───▶│  │   │
-│                          │                 │  Rollup    ────▶│  │   │
-│  ┌──────────────────┐    │  ┌───────────┐  └─────────────────┘  │   │
-│  │   PostgreSQL     │    │  │  Celery   │                        │   │
+│  │  · KB Detail     │    │  │  /kb      │  │  LLMClient ────▶│  │   │
+│  │  · Live SSE      │    │  │  /webhook │  │  Ingestor  ────▶│  │   │
+│  └──────────────────┘    │  └───────────┘  │  Compiler  ────▶│  │   │
+│                          │                 │  Gatekeeper ───▶│  │   │
+│  ┌──────────────────┐    │  ┌───────────┐  │  Rollup    ────▶│  │   │
+│  │   PostgreSQL     │    │  │  Celery   │  └─────────────────┘  │   │
 │  │  (org tree,      │◀──▶│  │  Workers  │◀── Redis Broker        │   │
 │  │   KB state,      │    │  └───────────┘                        │   │
 │  │   event log)     │    └──────────────────────────────────────┘   │
@@ -179,7 +226,7 @@ All cross-references use relative `[[wikilinks]]` so the entire KB is navigable 
 │  ┌──────────────────┐    ┌──────────────────────────────────────┐   │
 │  │      GCS         │    │          External Services            │   │
 │  │  (raw content    │    │  · GitHub API  (GitOps + Webhooks)   │   │
-│  │   archives)      │    │  · Gemini 3.7 Flash  (LLM)          │   │
+│  │   archives)      │    │  · Gemini Flash  (google-genai SDK)  │   │
 │  └──────────────────┘    │  · Ollama / Gemma 3  (local, free)  │   │
 │                          │  · Confluence / Notion / Jira APIs   │   │
 │                          └──────────────────────────────────────┘   │
@@ -194,9 +241,10 @@ All cross-references use relative `[[wikilinks]]` so the entire KB is navigable 
 |---|---|---|
 | **Frontend** | Next.js 14 (App Router) + TypeScript | SSE support, RSC, Cloud Run ready |
 | **UI** | shadcn/ui + Tailwind CSS + Framer Motion | Space theme, accessible, animated |
-| **Backend** | FastAPI (Python) | Async-native, ideal for AI/LLM workloads |
-| **AI — Major Tasks** | Google Gemini 3.7 Flash | Ingestion, compilation, rollup synthesis |
-| **AI — Minor Tasks** | Gemma 3 via Ollama (local) | Gatekeeper diff classification — free |
+| **Backend** | FastAPI (Python 3.12) | Async-native, ideal for AI/LLM workloads |
+| **AI SDK** | `google-genai` v2.18+ | Official, actively maintained Google GenAI SDK |
+| **AI — Remote** | Gemini Flash (via `google-genai`) | Ingestion, compilation, rollup — large context |
+| **AI — Local** | Gemma 3 via Ollama | Gatekeeper, map-phase summaries — free, private |
 | **Task Queue** | Celery + Redis | Durable async pipelines with retries |
 | **Database** | PostgreSQL + async SQLAlchemy | Recursive org tree, KB state, events |
 | **Git Integration** | PyGitHub (GitHub REST API) | Repo creation, branching, commits, PRs |
@@ -207,17 +255,17 @@ All cross-references use relative `[[wikilinks]]` so the entire KB is navigable 
 
 ---
 
+---
+
 ## 🌡️ KB Status Lifecycle
 
 | Status | Space Name | Meaning |
 |---|---|---|
-| `queued` | 🌑 **In the Void** | Submitted, waiting for a Celery worker |
-| `ingesting` | ☄️ **Scanning Nebula** | Ingestor agent is reading source code and docs |
-| `generating` | 🌟 **Compiling Stars** | Compiler agent is synthesizing OpenKB Markdown |
-| `in_review` | 💫 **Awaiting Launch** | PR is open on GitHub — awaiting human review |
-| `published` | 🌍 **In Orbit** | PR merged, KB is live and monitored |
-
----
+|  | 🌑 **In the Void** | Submitted, waiting for a Celery worker |
+|  | ☄️ **Scanning Nebula** | Ingestor agent is reading source code and docs |
+|  | 🌟 **Compiling Stars** | Compiler agent is synthesizing OpenKB Markdown |
+|  | 💫 **Awaiting Launch** | PR is open on GitHub — awaiting human review |
+|  | 🌍 **In Orbit** | PR merged, KB is live and monitored |
 
 ## ⚙️ Setup Guide
 
@@ -228,7 +276,7 @@ All cross-references use relative `[[wikilinks]]` so the entire KB is navigable 
 | Docker Desktop | Latest | `docker --version` |
 | Node.js | 20+ | `node --version` |
 | Python | 3.12+ | `python3 --version` |
-| Ollama (desktop app) | Latest | [ollama.com](https://ollama.com) |
+| Ollama (desktop app) | Latest | [ollama.com](https://ollama.com) *(only required for local/hybrid mode)* |
 
 ---
 
@@ -245,19 +293,29 @@ cp .env.example .env
 **Minimum required values:**
 
 ```bash
-# AI
-GEMINI_API_KEY=           # Get free at: aistudio.google.com
-GEMMA_MODEL=gemma3:12b    # Match the model tag pulled in Ollama
+# ── AI Mode ──────────────────────────────────────
+# "remote"  : Gemini only (default, fastest, needs GEMINI_API_KEY)
+# "local"   : Gemma only via Ollama (free, needs Ollama running)
+# "hybrid"  : Smart routing — best of both
+AI_MODE=remote
 
-# GitHub — GitOps (repo provisioning + PR creation)
+# ── Google AI (required for remote / hybrid mode) ─
+GEMINI_API_KEY=           # Get free at: aistudio.google.com
+GEMINI_MODEL=gemini-2.0-flash
+
+# ── Local Gemma (required for local / hybrid mode) ─
+GEMMA_OLLAMA_URL=http://localhost:11434
+GEMMA_MODEL=gemma3:12b   # Run: ollama pull gemma3:12b
+
+# ── GitHub — GitOps (repo provisioning + PR creation) ─
 GITHUB_APP_TOKEN=         # PAT with: repo, admin:repo_hook, workflow
 GITHUB_DEFAULT_ORG=       # Your GitHub username or org name
 
-# GitHub — OAuth (UI login)
+# ── GitHub — OAuth (UI login) ─────────────────────
 GITHUB_CLIENT_ID=         # From your GitHub OAuth App
 GITHUB_CLIENT_SECRET=     # From your GitHub OAuth App
 
-# Security
+# ── Security ──────────────────────────────────────
 NEXTAUTH_SECRET=          # Run: openssl rand -base64 32
 WEBHOOK_SECRET=           # Run: openssl rand -base64 32
 ```
@@ -280,11 +338,11 @@ docker compose up postgres redis -d
 docker compose ps
 ```
 
-**Ollama:** Make sure the Ollama desktop app is running. Verify:
+**Ollama** *(local/hybrid mode only)*: Make sure the Ollama desktop app is running. Verify:
 
 ```bash
 curl http://localhost:11434/api/tags
-# You should see gemma3:12b listed
+# You should see your model (e.g. gemma3:12b) listed
 ```
 
 If you do not have a model yet:
@@ -320,8 +378,6 @@ Open a **new terminal** in `apps/api` with the venv activated:
 source .venv/bin/activate
 celery -A workers.tasks worker --loglevel=info
 ```
-
-This processes all AI pipelines asynchronously with automatic retries.
 
 ---
 
@@ -395,24 +451,48 @@ docker compose up --build
 
 ---
 
+## ⚙️ Advanced Configuration
+
+All tuning knobs live in [`apps/api/core/config.py`](apps/api/core/config.py) and can be overridden in `.env`:
+
+```bash
+# ── Local mode tuning ────────────────────────────
+LOCAL_MAX_FILES=150          # Max files ingested (protects Gemma VRAM)
+LOCAL_CHUNK_SIZE=6000        # Chars per map-reduce chunk (~fits 8k num_ctx)
+LOCAL_MAX_PAGES=6            # Max pages in the documentation plan
+LOCAL_PAGE_TOKEN_BUDGET=20000  # Max chars of code context per page (~5k tokens)
+
+# ── Remote mode tuning ───────────────────────────
+REMOTE_SEMAPHORE_LIMIT=8     # Max concurrent Gemini calls (prevents 429s)
+REMOTE_INLINE_THRESHOLD=800000  # Repos under this skip map-reduce entirely
+REMOTE_MAX_PAGES=25          # Max pages in the documentation plan
+
+# ── Hybrid mode tuning ───────────────────────────
+HYBRID_LOCAL_CATEGORIES=summaries,entities   # KB dirs compiled by Gemma
+HYBRID_REMOTE_CATEGORIES=concepts,decisions  # KB dirs compiled by Gemini
+HYBRID_ENABLE_SYNTHESIS_PASS=true            # Gemini cross-link repair pass
+```
+
+---
+
 ## 📂 Monorepo Structure
 
 ```
 astrophage/
 ├── apps/
-│   ├── api/                    # FastAPI backend
-│   │   ├── agents/             # Ingestor, Compiler, Gatekeeper, Rollup
-│   │   ├── core/               # Config + security (HMAC, JWT)
-│   │   ├── db/                 # SQLAlchemy models, schemas, async engine
-│   │   ├── routers/            # API route handlers (orgs, kb, webhooks)
-│   │   ├── services/           # GitOps, GCS, SSE, source ingestion adapters
-│   │   └── workers/            # Celery tasks + polling
-│   └── web/                    # Next.js 14 frontend
-│       ├── app/                # App Router pages (dashboard, orgs, kb)
-│       ├── components/         # UI components + space/ theme components
-│       └── lib/                # Typed API client, SSE hook, NextAuth config
+│   ├── api/                          # FastAPI backend
+│   │   ├── agents/                   # Ingestor, Compiler, Gatekeeper, Rollup, LLM Client
+│   │   ├── core/                     # Config + security (HMAC, JWT)
+│   │   ├── db/                       # SQLAlchemy models, schemas, async engine
+│   │   ├── routers/                  # API route handlers (orgs, kb, webhooks)
+│   │   ├── services/                 # GitOps, GCS, SSE, source ingestion adapters
+│   │   └── workers/                  # Celery tasks + polling
+│   └── web/                          # Next.js 14 frontend
+│       ├── app/                      # App Router pages (dashboard, orgs, kb)
+│       ├── components/               # UI components + space/ theme components
+│       └── lib/                      # Typed API client, SSE hook, NextAuth config
 ├── packages/
-│   └── shared-types/           # Shared TypeScript interfaces
+│   └── shared-types/                 # Shared TypeScript interfaces
 ├── docker-compose.yml
 ├── turbo.json
 └── .env.example

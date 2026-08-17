@@ -8,7 +8,7 @@ pydantic-settings
 celery[redis]
 redis
 PyGitHub
-google-generativeai
+google-genai
 httpx
 python-multipart
 python-jose[cryptography]

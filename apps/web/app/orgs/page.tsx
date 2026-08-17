@@ -20,6 +20,8 @@ export default function OrgsPage() {
     });
   }, []);
 
+  const topLevelOrgs = orgs.filter(org => !org.parentOrgId);
+
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8">
       <div className="flex justify-between items-center">
@@ -34,16 +36,16 @@ export default function OrgsPage() {
 
       {loading ? (
         <div className="text-gray-500 font-mono">Loading organizations...</div>
-      ) : orgs.length === 0 ? (
+      ) : topLevelOrgs.length === 0 ? (
         <div className="text-gray-500 font-mono">No organizations found.</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {orgs.map((org) => (
+          {topLevelOrgs.map((org) => (
             <Link key={org.id} href={`/orgs/${org.id}`}>
               <NebulaCard glow="cyan" className="cursor-pointer h-full group">
                 <div className="flex items-start justify-between mb-4">
                   <div className="p-3 rounded-lg bg-white/5 group-hover:bg-stellar/20 transition-colors">
-                    <LayoutGrid className="w-6 h-6 text-stellar" />
+                    <Folder className="w-6 h-6 text-stellar" />
                   </div>
                 </div>
                 <h3 className="text-xl font-space font-semibold mb-4">{org.name}</h3>
