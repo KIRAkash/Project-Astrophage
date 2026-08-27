@@ -142,6 +142,20 @@ export default function ExploreKBPage({ params }: { params: { kbId: string } }) 
     );
   };
 
+  // Preprocess [[wikilinks]] into markdown links for ReactMarkdown
+  const preprocessWikilinks = (content: string): string => {
+    return content.replace(/\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|([^\]]+))?\]\]/g, (_, target, anchor, title) => {
+      const cleanTarget = target.trim();
+      const label = title ? title.trim() : (cleanTarget.split('/').pop() || cleanTarget);
+      const fullTarget = anchor ? `${cleanTarget}#${anchor}` : cleanTarget;
+      if (cleanTarget.startsWith('ap:') || cleanTarget.startsWith('kb:')) {
+        return `[${label}](#${fullTarget})`;
+      }
+      return `[${label}](#ap:${fullTarget})`;
+    });
+  };
+
+
   return (
     <div className="p-8 max-w-[1600px] mx-auto h-[calc(100vh-4rem)] flex flex-col space-y-4">
       <div className="flex items-center justify-between shrink-0">
@@ -171,7 +185,38 @@ export default function ExploreKBPage({ params }: { params: { kbId: string } }) 
             <div className="text-gray-500 font-mono flex items-center justify-center h-full">Loading file...</div>
           ) : fileContent ? (
             <div className="prose prose-invert prose-pre:bg-black/50 prose-pre:border prose-pre:border-white/10 max-w-none">
-              <ReactMarkdown>{fileContent}</ReactMarkdown>
+              <ReactMarkdown
+                components={{
+                  a: ({ href, children, ...props }) => {
+                    if (href && (href.startsWith('#ap:') || href.startsWith('#kb:') || href.endsWith('.md') || !href.startsWith('http'))) {
+                      let targetPath = href.replace(/^#(?:ap|kb):/, '').replace(/^\.\//, '');
+                      if (!targetPath.endsWith('.md') && !targetPath.includes('#')) {
+                        targetPath = `${targetPath}.md`;
+                      }
+                      return (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            loadFile(targetPath);
+                          }}
+                          className="text-orbit hover:text-stellar underline underline-offset-4 inline-flex items-center gap-0.5 font-medium transition-colors cursor-pointer text-left"
+                        >
+                          {children}
+                        </button>
+                      );
+                    }
+
+                    return (
+                      <a href={href} target="_blank" rel="noopener noreferrer" className="text-orbit hover:underline" {...props}>
+                        {children}
+                      </a>
+                    );
+                  }
+                }}
+              >
+                {preprocessWikilinks(fileContent)}
+              </ReactMarkdown>
             </div>
           ) : (
             <div className="text-gray-500 font-mono flex flex-col items-center justify-center h-full gap-4">

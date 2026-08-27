@@ -4,7 +4,8 @@ import { StatusBadge } from '@/components/status-badge';
 import { KBEventFeed } from '@/components/kb-event-feed';
 import { useKBStatus } from '@/lib/sse';
 import Link from 'next/link';
-import { ExternalLink, GitMerge, Github, FileText, RefreshCw, AlertTriangle } from 'lucide-react';
+import { ExternalLink, GitMerge, Github, FileText, RefreshCw, AlertTriangle, GitCompare, Code2, Sparkles, MessageSquare, Book, Trello, Upload, CheckCircle2 } from 'lucide-react';
+
 import { KBStatus, KnowledgeBase } from '@/types/kb';
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
@@ -13,7 +14,10 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
   const [kb, setKb] = useState<KnowledgeBase | null>(null);
   const [loading, setLoading] = useState(true);
   const [restarting, setRestarting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [restartMessage, setRestartMessage] = useState<string | null>(null);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'info' | 'success' | 'warning' | 'error' } | null>(null);
 
   const fetchKb = () => {
     api.getKB(params.kbId).then((data) => {
@@ -39,8 +43,8 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
     try {
       const updated = await api.restartKB(params.kbId);
       setKb(updated);
-      setRestartMessage("Pipeline restarted successfully!");
-      setTimeout(() => setRestartMessage(null), 4000);
+      setRestartMessage("Pipeline restarted from scratch (all cached checkpoints cleared)!");
+      setTimeout(() => setRestartMessage(null), 5000);
     } catch (err: any) {
       console.error("Failed to restart pipeline:", err);
       setRestartMessage(err?.message || "Failed to restart pipeline");
@@ -48,6 +52,60 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
       setRestarting(false);
     }
   };
+
+  const handleRetry = async () => {
+    setRetrying(true);
+    setRestartMessage(null);
+    try {
+      const updated = await api.retryKB(params.kbId);
+      setKb(updated);
+      setRestartMessage("Retrying pipeline (resuming from saved checkpoints)...");
+      setTimeout(() => setRestartMessage(null), 5000);
+    } catch (err: any) {
+      console.error("Failed to retry pipeline:", err);
+      setRestartMessage(err?.message || "Failed to retry pipeline");
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const handleCheckUpdates = async () => {
+    setCheckingUpdates(true);
+    setSyncMessage(null);
+    try {
+      const res = await api.checkKBUpdates(params.kbId);
+      if (res.status === 'triggered') {
+        const triggers = res.sources_scanned?.filter(s => s.status === 'triggered') || [];
+        const triggerSummary = triggers.map(t => `${t.source_type.toUpperCase()}: ${t.summary || 'Changes detected'}`).join(' | ');
+        setSyncMessage({
+          text: `Gatekeeper evaluation initiated: ${triggerSummary || res.message || 'Changes detected across sources'}`,
+          type: 'success',
+        });
+      } else if (res.status === 'no_changes') {
+        setSyncMessage({
+          text: res.message || `No new changes detected across configured sources.`,
+          type: 'info',
+        });
+      } else {
+        setSyncMessage({
+          text: res.message || "Multi-source update check completed.",
+          type: 'info',
+        });
+      }
+      setTimeout(() => setSyncMessage(null), 8000);
+      fetchKb();
+    } catch (err: any) {
+      console.error("Failed to check updates:", err);
+      setSyncMessage({
+        text: err?.message || "Failed to check source systems for updates.",
+        type: 'error',
+      });
+      setTimeout(() => setSyncMessage(null), 8000);
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
   
   if (loading) {
     return <div className="p-8 max-w-7xl mx-auto text-gray-500 font-mono">Loading telemetry...</div>;
@@ -115,12 +173,23 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
           </div>
           
           <button
+            onClick={handleCheckUpdates}
+            disabled={checkingUpdates || restarting}
+            className="bg-nebula/20 hover:bg-nebula/30 text-nebula-light border border-nebula/40 px-4 py-2 rounded-lg font-mono text-sm flex items-center gap-2 transition-all disabled:opacity-50 shadow-[0_0_10px_rgba(124,58,237,0.15)]"
+            title="Inspect source repository for latest commits and trigger Gatekeeper update"
+          >
+            <GitCompare className={`w-4 h-4 ${checkingUpdates ? 'animate-spin' : ''}`} />
+            {checkingUpdates ? 'Scanning Diff...' : 'Scan for Changes'}
+          </button>
+
+          <button
             onClick={handleRestart}
-            disabled={restarting}
-            className="bg-stellar/20 hover:bg-stellar/30 text-stellar border border-stellar/40 px-4 py-2 rounded-lg font-mono text-sm flex items-center gap-2 transition-all disabled:opacity-50 shadow-[0_0_10px_rgba(56,189,248,0.15)]"
+            disabled={restarting || retrying || checkingUpdates}
+            className="bg-stellar/20 hover:bg-stellar/30 text-stellar border border-stellar/40 px-4 py-2 rounded-lg font-mono text-sm flex items-center gap-2 transition-all disabled:opacity-50 shadow-[0_0_10px_rgba(56,189,248,0.15)] cursor-pointer"
+            title="Wipes all saved checkpoints on disk and restarts ingestion & compilation from scratch"
           >
             <RefreshCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />
-            {restarting ? 'Restarting...' : 'Restart Pipeline'}
+            {restarting ? 'Restarting from Scratch...' : 'Restart from Scratch'}
           </button>
 
           {kb.gitRepoUrl && (
@@ -136,6 +205,25 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
         </div>
       </div>
 
+      {syncMessage && (
+        <div className={`p-4 rounded-xl font-mono text-sm flex items-center gap-3 border ${
+          syncMessage.type === 'error'
+            ? 'bg-red-500/10 border-red-500/30 text-red-300'
+            : syncMessage.type === 'success'
+            ? 'bg-orbit/10 border-orbit/30 text-orbit'
+            : 'bg-stellar/10 border-stellar/30 text-stellar'
+        }`}>
+          {syncMessage.type === 'error' ? (
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+          ) : syncMessage.type === 'success' ? (
+            <Sparkles className="w-4 h-4 text-orbit shrink-0 animate-pulse" />
+          ) : (
+            <Code2 className="w-4 h-4 text-stellar shrink-0" />
+          )}
+          {syncMessage.text}
+        </div>
+      )}
+
       {restartMessage && (
         <div className="p-4 rounded-xl bg-stellar/10 border border-stellar/30 text-stellar font-mono text-sm flex items-center gap-3">
           <RefreshCw className="w-4 h-4 animate-spin" />
@@ -143,26 +231,38 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
         </div>
       )}
 
-      {/* Failure Banner */}
-      {(currentStatus === 'failed' || latestErrorEvent) && currentStatus !== 'in_review' && currentStatus !== 'published' && (
+      {/* Failure Banner - Only shown when status is failed and not actively running/retrying */}
+      {currentStatus === 'failed' && !restarting && !retrying && (
         <div className="p-5 rounded-xl border border-red-500/40 bg-red-500/10 shadow-[0_0_20px_rgba(239,68,68,0.15)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
             <AlertTriangle className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
             <div>
               <h3 className="font-space font-bold text-red-200">Pipeline Execution Encountered An Error</h3>
               <p className="font-mono text-xs text-red-300/80 mt-1 max-w-2xl">
-                {latestErrorEvent?.payload?.error || (latestErrorEvent as any)?.description || "The automated knowledge pipeline failed during execution. You can restart the pipeline to retry ingestion and compilation."}
+                {latestErrorEvent?.payload?.error || (latestErrorEvent as any)?.description || "The automated knowledge pipeline failed during execution. Choose to retry from the latest checkpoint or restart from scratch."}
               </p>
             </div>
           </div>
-          <button
-            onClick={handleRestart}
-            disabled={restarting}
-            className="bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40 px-4 py-2 rounded-lg font-mono text-sm flex items-center gap-2 transition-all shrink-0 font-semibold"
-          >
-            <RefreshCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />
-            Retry Pipeline
-          </button>
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={handleRetry}
+              disabled={retrying || restarting}
+              className="bg-orbit/20 hover:bg-orbit/30 text-orbit border border-orbit/40 px-4 py-2 rounded-lg font-mono text-sm flex items-center gap-2 transition-all font-semibold cursor-pointer shadow-[0_0_10px_rgba(16,185,129,0.15)]"
+              title="Resumes compilation from already generated checkpoints"
+            >
+              <RefreshCw className={`w-4 h-4 ${retrying ? 'animate-spin' : ''}`} />
+              {retrying ? 'Retrying...' : 'Retry (From Checkpoint)'}
+            </button>
+            <button
+              onClick={handleRestart}
+              disabled={restarting || retrying}
+              className="bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40 px-4 py-2 rounded-lg font-mono text-sm flex items-center gap-2 transition-all font-semibold cursor-pointer"
+              title="Clears all saved checkpoints and restarts from scratch"
+            >
+              <RefreshCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />
+              {restarting ? 'Restarting...' : 'Restart from Scratch'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -226,18 +326,52 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
         {/* Sidebar */}
         <div className="space-y-8">
           <NebulaCard title="Source Systems" glow="none">
-            <ul className="space-y-4">
-              {sourcesList.map((source, idx) => (
-                <li key={idx} className="flex items-center gap-3 text-sm font-mono text-gray-300">
-                  {source.type === 'github' ? <Github className="w-4 h-4 text-gray-400 shrink-0" /> : <FileText className="w-4 h-4 text-blue-400 shrink-0" />}
-                  <a href={source.url} target="_blank" rel="noreferrer" className="hover:text-stellar truncate">{source.url}</a>
-                </li>
-              ))}
+            <ul className="space-y-3">
+              {sourcesList.map((source: any, idx) => {
+                const sType = source.type || 'github';
+                let IconComponent = Github;
+                let colorClass = "text-gray-400";
+                if (sType === 'confluence') { IconComponent = FileText; colorClass = "text-blue-400"; }
+                else if (sType === 'notion') { IconComponent = Book; colorClass = "text-amber-400"; }
+                else if (sType === 'slack') { IconComponent = MessageSquare; colorClass = "text-emerald-400"; }
+                else if (sType === 'jira') { IconComponent = Trello; colorClass = "text-cyan-400"; }
+                else if (sType === 'upload') { IconComponent = Upload; colorClass = "text-purple-400"; }
+
+                const isAutoSync = source.incrementalEnabled !== false && sType !== 'upload';
+
+                return (
+                  <li key={idx} className="p-2.5 rounded-lg bg-white/5 border border-white/10 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs font-mono text-gray-200">
+                        <IconComponent className={`w-3.5 h-3.5 ${colorClass} shrink-0`} />
+                        <span className="font-bold uppercase">{sType}</span>
+                      </div>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                        isAutoSync 
+                          ? 'bg-orbit/10 border-orbit/30 text-orbit' 
+                          : 'bg-white/5 border-white/10 text-gray-500'
+                      }`}>
+                        {isAutoSync ? '● Auto-Sync' : 'Manual'}
+                      </span>
+                    </div>
+                    <div className="text-xs font-mono text-gray-400 truncate">
+                      {source.url ? (
+                        <a href={source.url} target="_blank" rel="noreferrer" className="hover:text-stellar truncate">
+                          {source.url}
+                        </a>
+                      ) : (
+                        <span className="italic text-gray-600">Local uploaded archive</span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
               {sourcesList.length === 0 && (
                 <li className="text-gray-500 font-mono text-sm">No sources configured.</li>
               )}
             </ul>
           </NebulaCard>
+
 
           <NebulaCard title="Metadata" glow="none">
             <div className="space-y-3 text-sm font-mono">

@@ -7,10 +7,13 @@ from ..db.database import get_db
 from ..db.models import SourceMonitor, KnowledgeBase, Org, KBStatus
 from ..workers.tasks import gatekeeper_pipeline_task, rollup_pipeline_task
 from ..services.gitops import get_commit_diff
+import logging
 
-router = APIRouter(prefix="/api/webhooks/github", tags=["Webhooks"])
+logger = logging.getLogger(__name__)
 
-@router.post("/push")
+router = APIRouter(prefix="/api/webhooks", tags=["Webhooks"])
+
+@router.post("/github/push")
 async def handle_github_push(
     request: Request,
     x_hub_signature_256: str = Header(None),
@@ -24,18 +27,30 @@ async def handle_github_push(
     repo_url = payload['repository']['html_url']
     after_sha = payload['after']
     
-    result = await db.execute(select(SourceMonitor).where(SourceMonitor.repo_url == repo_url))
+    result = await db.execute(select(SourceMonitor).where(
+        (SourceMonitor.repo_url == repo_url) | (SourceMonitor.source_url == repo_url)
+    ))
     monitors = result.scalars().all()
     
     for monitor in monitors:
+        if not monitor.incremental_enabled:
+            continue
         diff = get_commit_diff(payload['repository']['full_name'], after_sha)
-        gatekeeper_pipeline_task.delay(str(monitor.kb_id), diff)
+        gatekeeper_pipeline_task.delay(
+            kb_id=str(monitor.kb_id),
+            diff=diff,
+            source_type="github",
+            source_url=repo_url,
+            commit_sha=after_sha,
+            commit_message=payload.get('head_commit', {}).get('message', ''),
+            author=payload.get('head_commit', {}).get('author', {}).get('name', 'Unknown'),
+        )
         monitor.last_commit_sha = after_sha
         
     await db.commit()
     return {"status": "accepted"}
 
-@router.post("/pr")
+@router.post("/github/pr")
 async def handle_github_pr(
     request: Request,
     x_hub_signature_256: str = Header(None),
@@ -64,3 +79,86 @@ async def handle_github_pr(
                 rollup_pipeline_task.delay(str(kb.org_id))
 
     return {"status": "accepted"}
+
+@router.post("/slack/events")
+async def handle_slack_events(request: Request, db: AsyncSession = Depends(get_db)):
+    """Handle Slack Event Subscriptions (e.g. message.channels)."""
+    payload = await request.json()
+
+    # 1. Handle URL Verification Challenge from Slack
+    if payload.get("type") == "url_verification":
+        return {"challenge": payload.get("challenge")}
+
+    event = payload.get("event", {})
+    event_type = event.get("type")
+
+    if event_type in ("message", "app_mention"):
+        channel = event.get("channel")
+        text = event.get("text", "")
+        user = event.get("user", "SlackUser")
+        ts = event.get("ts", "")
+
+        # Skip bot messages to prevent infinite loops
+        if event.get("bot_id") or event.get("subtype") == "bot_message":
+            return {"status": "ignored_bot_message"}
+
+        # Find any monitors configured for this Slack channel
+        result = await db.execute(select(SourceMonitor).where(SourceMonitor.source_type == "slack"))
+        monitors = result.scalars().all()
+
+        for mon in monitors:
+            if not mon.incremental_enabled:
+                continue
+            cfg_channel = (mon.config or {}).get("channel_id") or mon.target_url
+            if channel in cfg_channel or mon.target_url.endswith(channel):
+                diff_text = f"### 💬 Real-time Slack Message from #{channel}\n\n**{user}**: {text}\n"
+                gatekeeper_pipeline_task.delay(
+                    kb_id=str(mon.kb_id),
+                    diff=diff_text,
+                    source_type="slack",
+                    source_url=mon.target_url,
+                    commit_sha=ts,
+                    commit_message=f"Slack #{channel} message from {user}",
+                    author=user,
+                    summary=text[:100],
+                )
+                mon.last_commit_sha = ts
+
+        await db.commit()
+
+    return {"status": "accepted"}
+
+@router.post("/confluence")
+async def handle_confluence_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    """Handle Atlassian / Confluence webhook events (page_created, page_updated)."""
+    payload = await request.json()
+    page = payload.get("page", {})
+    space = payload.get("space", {})
+    space_key = space.get("key") or payload.get("spaceKey", "")
+    page_title = page.get("title", "Updated Page")
+    page_id = str(page.get("id", ""))
+
+    if space_key:
+        result = await db.execute(select(SourceMonitor).where(SourceMonitor.source_type == "confluence"))
+        monitors = result.scalars().all()
+
+        for mon in monitors:
+            if not mon.incremental_enabled:
+                continue
+            if space_key in mon.target_url or (mon.config or {}).get("space_key") == space_key:
+                diff_text = f"### 📄 Confluence Webhook Event\nSpace: `{space_key}`\nPage: `{page_title}` (ID: {page_id})\nEvent: `{payload.get('eventType', 'page_updated')}`"
+                gatekeeper_pipeline_task.delay(
+                    kb_id=str(mon.kb_id),
+                    diff=diff_text,
+                    source_type="confluence",
+                    source_url=mon.target_url,
+                    commit_sha=page_id,
+                    commit_message=f"Confluence page '{page_title}' in space {space_key}",
+                    author=payload.get("user", {}).get("displayName", "ConfluenceUser"),
+                    summary=f"Confluence page update: {page_title}",
+                )
+
+        await db.commit()
+
+    return {"status": "accepted"}
+

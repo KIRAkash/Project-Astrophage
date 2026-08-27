@@ -16,5 +16,6 @@ passlib[bcrypt]
 aiofiles
 python-dotenv
 google-adk
+google-cloud-storage
 sse-starlette
 greenlet

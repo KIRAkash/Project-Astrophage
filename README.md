@@ -175,7 +175,123 @@ Every compiled KB page contains accurate `[[wikilinks]]` to other pages from the
 
 ---
 
+## 🌐 Enterprise Cross-Repository Inter-Wiki Linking & Contract Mesh
+
+In enterprise microservice systems, applications frequently communicate across APIs, Kafka streams, shared datastores, and private SDKs. Project Astrophage features an automated **Cross-Repository Interface Mesh** that enables knowledge bases to discover and link to each other with **zero manual configuration**.
+
+### 1. Cross-KB Wikilink Syntax
+Cross-application links use standard scoped wikilinks:
+- `[[kb:<target-app-name>/<page-path>#<anchor>|<display-label>]]`
+- **Example**: `[[kb:order-matching-engine/summaries/events#matched-trades|Matching Engine Trade Stream]]`
+- Resolves to: `https://github.com/<org>/openkb-<target-app-name>/blob/main/<page-path>.md`
+
+### 2. How Automated Discovery Works (No Manual Onboarding)
+1. **Contract Registration**: When a repo (e.g. `order-matching-engine`) is compiled, its exported endpoints, event topics, and models are indexed into `OrgInterfaceContract`.
+2. **Signature Extraction (Flow A & Flow B)**: When a consuming repo (e.g. `compliance-surveillance-monitor`) is ingested, the scanner parses route calls, Kafka topic subscriptions, and configs.
+3. **3-Stage Fast-Pruning Engine**:
+   - **Stage 1 (Inverted Index, <5ms)**: Matches extracted string literals against the org contract catalog in PostgreSQL.
+   - **Stage 2 (Brief Catalog Pruning)**: Ranks candidate services using `.astrophage/brief.md` summaries.
+   - **Stage 3 (Scoped Manifest Injection)**: Injects only the top 1–5 relevant candidate links into the Compiler LLM prompt, keeping token usage minimal.
+4. **Deterministic Linter Gate**: `apps/api/agents/linter.py` validates cross-KB link targets and prevents dead links.
+
+### 3. Scaling to Large Enterprises: POC vs Enterprise Roadmap
+
+| Area | POC Phase (Lightweight & Immediate) | Enterprise Production Roadmap |
+|---|---|---|
+| **Protocols Covered** | REST endpoints, Kafka topics, gRPC protobufs | REST, GraphQL, gRPC, PubSub, DB schemas, Private SDKs, Airflow DAGs, Gateway routes |
+| **Catalog Search** | Direct SQL query on extracted literals | B-Tree & GIN inverted indexes (<5ms over 100k+ contracts) + Vector brief search |
+| **Out-of-Order Onboarding** | Unresolved references stored as styled inline text | Bi-directional dependency tracker; auto-weaves links when producer app is later onboarded |
+| **Downstream Impact** | Logged to event timeline during Gatekeeper sync | Reverse-dependency webhook bus alerting downstream repos of upstream breaking changes |
+
+---
+
+## 🔌 Multi-Source Knowledge Base & Extensible Connector Architecture
+
+Astrophage is not limited to source code. It unifies distributed enterprise context across **6 official connectors** into a single consolidated knowledge base, and supports continuous incremental delta tracking across all of them:
+
+```
+                  ┌──────────────────────────────────────────────┐
+                  │          Astrophage Connector Mesh           │
+                  └──────────────────────┬───────────────────────┘
+                                         │
+        ┌─────────────┬─────────────┬────┴────────┬─────────────┬─────────────┐
+        ▼             ▼             ▼             ▼             ▼             ▼
+   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐
+   │ GitHub  │   │Conflu-  │   │ Notion  │   │  Slack  │   │  Jira   │   │  File   │
+   │  / Git  │   │  ence   │   │  Pages  │   │Channels │   │Projects │   │ Upload  │
+   └────┬────┘   └────┬────┘   └────┬────┘   └────┬────┘   └────┬────┘   └────┬────┘
+        │             │             │             │             │             │
+        │ Commit diff │ Page update │ Block edits │ Chat thread │ JQL tickets │ Static doc
+        ▼             ▼             ▼             ▼             ▼             ▼
+   ─────────────────────────────────────────────────────────────────────────────
+                             GATEKEEPER PIPELINE
+               Evaluates architectural significance → Compiles PR Patch
+   ─────────────────────────────────────────────────────────────────────────────
+```
+
+### 1. Supported Source Connectors
+
+| Connector | Type Key | Ingestion Capabilities | Incremental Delta Tracking |
+|---|---|---|---|
+| **GitHub / Git** | `github` | Full repository tree, AST parsing, multi-branch support, sub-path directory filtering | Commit-by-commit diffs, PR merges, branch comparisons |
+| **Confluence** | `confluence` | Space-wide page traversal, parent-child hierarchies, Atlassian storage XML to Markdown conversion | Space change inspection, version increment tracking, modified page deltas |
+| **Notion** | `notion` | Page & database resolution, recursive 15+ level block tree DFS traversal, database properties | `last_edited_time` cursor polling and webhook notifications |
+| **Slack** | `slack` | Channel message history, conversation thread replies, channel metadata, topic & purpose | Timestamp-based polling (`conversations.history?oldest=ts`) & real-time webhook subscriptions (`message.channels`) |
+| **Jira** | `jira` | Project issue extraction, Epics, User Stories, Architecture Tasks, acceptance criteria | JQL timestamp queries (`project = 'X' AND updated >= 'timestamp'`) |
+| **File Upload** | `upload` | Local architecture markdown, OpenAPI schemas, PDF documentation, zipped repositories | Snapshot reload & re-indexing |
+
+### 2. UI Configuration & Per-Source Customization
+
+In the Astrophage web dashboard, users can add multiple sources simultaneously and configure granular parameters per source:
+- **Incremental Ingestion Switch**: Toggle auto-sync on/off per source (e.g. keep GitHub auto-syncing while keeping static files frozen).
+- **Source-Specific Customizations**:
+  - *Confluence*: Space Key override, custom domain.
+  - *Slack*: Target Channel ID / Name, toggle thread reply inclusion.
+  - *Notion*: Page/Database ID, nested block depth limits.
+  - *Jira*: Project Key, issue type filter (e.g., `Epic, Story, Task`).
+  - *GitHub*: Custom branch name, sub-directory path filter.
+
+### 3. Writing Custom Connectors (Extensibility SDK)
+
+The connector architecture is 100% pluggable. You can create custom connectors for internal wikis, Google Docs, Figma specs, or private databases by extending `BaseConnector` and registering it in the registry:
+
+```python
+from apps.api.services.source_ingestion.base import BaseConnector, IncrementalDelta
+from apps.api.services.source_ingestion import register_connector
+
+class CustomInternalWikiConnector(BaseConnector):
+    async def ingest(self, url: str, token: str = None, config: dict = None, on_progress = None) -> str:
+        # Fetch data from your custom API
+        docs = await self.client.get(f"{url}/api/export")
+        return f"# Internal Wiki Docs\n\n{docs.text}"
+
+    async def check_incremental_updates(self, url: str, token: str = None, last_state: dict = None, config: dict = None) -> IncrementalDelta:
+        # Check for new updates since last_state
+        last_version = (last_state or {}).get("version", 0)
+        res = await self.client.get(f"{url}/api/changes?since={last_version}")
+        changes = res.json()
+        
+        if not changes:
+            return IncrementalDelta(has_changes=False, new_state=last_state)
+            
+        return IncrementalDelta(
+            has_changes=True,
+            delta_content=changes["diff_text"],
+            summary=f"Detected {len(changes['items'])} new architecture specs",
+            new_state={"version": changes["latest_version"]},
+            affected_items=changes["items"],
+            source_type="custom_wiki",
+            source_url=url,
+        )
+
+# Register into the global connector registry:
+register_connector("custom_wiki", CustomInternalWikiConnector)
+```
+
+---
+
 ## 📁 OpenKB Output Structure
+
 
 Every generated knowledge base follows the **Google OKF (Open Knowledge Format)** standard — plain Markdown files, fully Obsidian-compatible:
 

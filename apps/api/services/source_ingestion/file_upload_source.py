@@ -12,7 +12,8 @@ class FileUploadConnector(BaseConnector):
     async def ingest(
         self,
         url: str,
-        token: Optional[str],
+        token: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
         on_progress: Optional[Callable[[str, Dict[str, Any]], Any]] = None
     ) -> str:
         if on_progress:
@@ -41,7 +42,8 @@ class FileUploadConnector(BaseConnector):
 
         return content
 
-async def process_uploaded_file(gcs_path: str) -> str:
+async def process_uploaded_file(gcs_path: str, config: Optional[Dict[str, Any]] = None) -> str:
     async with httpx.AsyncClient() as client:
         connector = FileUploadConnector(client)
-        return await connector.ingest(gcs_path, None)
+        return await connector.ingest(gcs_path, None, config=config)
+

@@ -27,8 +27,14 @@ export function KBEventFeed({ events }: KBEventFeedProps) {
       case 'repo_provisioned': return <Github className="w-4 h-4 text-pink-400" />;
       case 'pr_opened': return <GitPullRequest className="w-4 h-4 text-pulsar" />;
       case 'gatekeeper_pass': return <ShieldCheck className="w-4 h-4 text-orbit" />;
-      case 'gatekeeper_block': return <ShieldX className="w-4 h-4 text-red-500" />;
+      case 'gatekeeper_significant': return <ShieldCheck className="w-4 h-4 text-orbit" />;
+      case 'gatekeeper_trivial': return <ShieldX className="w-4 h-4 text-amber-400" />;
+      case 'gatekeeper_block': return <ShieldX className="w-4 h-4 text-amber-400" />;
+      case 'gatekeeper_evaluation_started': return <Cpu className="w-4 h-4 text-cyan-400" />;
+      case 'diff_checked': return <Code2 className="w-4 h-4 text-stellar" />;
       case 'diff_ingested': return <Code2 className="w-4 h-4 text-nebula" />;
+      case 'patch_compilation_started': return <Sparkles className="w-4 h-4 text-nebula animate-pulse" />;
+      case 'patch_compiled': return <CheckCircle2 className="w-4 h-4 text-orbit" />;
       case 'pipeline_error': return <AlertTriangle className="w-4 h-4 text-red-500" />;
       default: return <ArrowRight className="w-4 h-4 text-gray-400" />;
     }
@@ -46,6 +52,12 @@ export function KBEventFeed({ events }: KBEventFeedProps) {
         if (!desc && event.payload) {
           if (event.payload.error) desc = `Error: ${event.payload.error}`;
           else if (event.payload.message) desc = `${event.payload.message}`;
+          else if (eventType === 'diff_checked') desc = `Diff inspected: Commit ${event.payload.commit_sha?.slice(0, 7) || 'HEAD'} - ${event.payload.commit_message || ''}`;
+          else if (eventType === 'gatekeeper_significant') desc = `Gatekeeper: SIGNIFICANT change detected - ${event.payload.reason}`;
+          else if (eventType === 'gatekeeper_trivial') desc = `Gatekeeper: TRIVIAL change - ${event.payload.reason}`;
+          else if (eventType === 'gatekeeper_block') desc = `Gatekeeper: Update skipped - ${event.payload.reason || event.payload.message}`;
+          else if (eventType === 'patch_compilation_started') desc = `Compiling patch for affected files: ${event.payload.affected_files?.join(', ') || 'KB documentation'}`;
+          else if (eventType === 'patch_compiled') desc = `Patch compiled successfully: ${event.payload.file_count} files updated`;
           else if (eventType === 'source_scanning') desc = `Scanning source repository: ${event.payload.source}`;
           else if (eventType === 'source_files_found') desc = `Found ${event.payload.file_count} matching files in ${event.payload.source}`;
           else if (eventType === 'source_downloaded') desc = `Ingested source (${event.payload.chars} chars) from ${event.payload.source}`;

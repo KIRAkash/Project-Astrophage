@@ -1,14 +1,36 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
-_ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
-_ENV_FILES = [
-    str(_ROOT_DIR / ".env"),
-    str(_ROOT_DIR / "apps" / ".env"),
-    ".env"
-]
+def _find_env_file() -> Optional[str]:
+    """Search upwards from current working directory and config file directory for .env."""
+    if os.getenv("ENV_FILE") and os.path.exists(os.getenv("ENV_FILE")):
+        return os.path.abspath(os.getenv("ENV_FILE"))
+    
+    # Check cwd and all its parents
+    curr = Path.cwd().resolve()
+    for parent in [curr] + list(curr.parents):
+        candidate = parent / ".env"
+        if candidate.is_file():
+            return str(candidate)
+            
+    # Check config.py location and all its parents
+    config_dir = Path(__file__).resolve().parent
+    for parent in [config_dir] + list(config_dir.parents):
+        candidate = parent / ".env"
+        if candidate.is_file():
+            return str(candidate)
+            
+    return None
+
+_ENV_FILE = _find_env_file()
+_ROOT_DIR = Path(_ENV_FILE).parent if _ENV_FILE else Path(__file__).resolve().parent.parent.parent.parent
+if _ENV_FILE:
+    load_dotenv(_ENV_FILE, override=True)
+else:
+    load_dotenv(override=True)
 
 class Settings(BaseSettings):
     # ── AI Mode ───────────────────────────────────────────────────────────────
@@ -20,7 +42,7 @@ class Settings(BaseSettings):
 
     # ── Gemini (Remote) ───────────────────────────────────────────────────────
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-3.7-flash"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
 
     # ── Gemma / Ollama (Local) ────────────────────────────────────────────────
     GEMMA_OLLAMA_URL: str = "http://localhost:11434"
@@ -29,11 +51,19 @@ class Settings(BaseSettings):
     # ── GitHub / Integrations ─────────────────────────────────────────────────
     GITHUB_CLIENT_ID: str = ""
     GITHUB_CLIENT_SECRET: str = ""
-    GITHUB_APP_TOKEN: str = ""
+    GITHUB_APP_TOKEN: str = ""                         # Legacy PAT fallback
+    GITHUB_APP_ID: Optional[str] = None                # GitHub App numeric ID
+    GITHUB_APP_INSTALLATION_ID: Optional[str] = None   # Target Org/Repo Installation ID
+    GITHUB_APP_PRIVATE_KEY: Optional[str] = None       # Inline PEM key string
+    GITHUB_APP_PRIVATE_KEY_PATH: Optional[str] = None  # Path to .pem private key file
+    GITHUB_APP_SLUG: str = "astrophage-gitops"         # Bot name slug
     GITHUB_DEFAULT_ORG: str = ""
     CONFLUENCE_API_TOKEN: Optional[str] = None
     NOTION_API_TOKEN: Optional[str] = None
+    SLACK_BOT_TOKEN: Optional[str] = None
+    SLACK_SIGNING_SECRET: Optional[str] = None
     JIRA_API_TOKEN: Optional[str] = None
+
 
     # ── Infrastructure ────────────────────────────────────────────────────────
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost/astrophage"
@@ -46,37 +76,58 @@ class Settings(BaseSettings):
     WEBHOOK_BASE_URL: str = "http://localhost:8000"    # Override with public URL in production
 
     # ── Local Mode Tuning ─────────────────────────────────────────────────────
-    # MAX_FILES caps ingestion to protect Gemma's VRAM.
-    # CHUNK_SIZE is chars per map-reduce chunk (fits inside 8k num_ctx).
-    # MAX_PAGES caps the documentation plan so sequential compilation stays fast.
-    # PAGE_TOKEN_BUDGET limits prompt size per page (in chars, not tokens).
     LOCAL_MAX_FILES: int = 150
     LOCAL_CHUNK_SIZE: int = 6000
     LOCAL_MAX_PAGES: int = 6
     LOCAL_PAGE_TOKEN_BUDGET: int = 20000  # ~5k tokens at 4 chars/token
 
-    # ── Remote Mode Tuning ────────────────────────────────────────────────────
-    # SEMAPHORE_LIMIT controls concurrent Gemini calls to avoid 429 storms.
-    # INLINE_THRESHOLD: repos under this many chars skip map-reduce entirely —
-    #   the full codebase goes into a single Gemini context window.
-    # MAX_PAGES is the upper cap on the documentation plan.
-    REMOTE_SEMAPHORE_LIMIT: int = 8
+    # ── Remote Mode Tuning & Rate Limiting ────────────────────────────────────
+    GEMINI_RATE_LIMIT_SAFE_MODE: bool = True
+    GEMINI_MAX_CONCURRENCY: int = 2
+    GEMINI_REQUEST_DELAY_SECONDS: float = 2.0
+    REMOTE_SEMAPHORE_LIMIT: int = 2
     REMOTE_INLINE_THRESHOLD: int = 800000
     REMOTE_MAX_PAGES: int = 25
 
     # ── Hybrid Mode Tuning ────────────────────────────────────────────────────
-    # LOCAL_CATEGORIES: KB page directory prefixes compiled by Gemma locally.
-    # REMOTE_CATEGORIES: KB page directory prefixes compiled by Gemini remotely.
-    # ENABLE_SYNTHESIS_PASS: whether to run a Gemini cross-link repair after compilation.
     HYBRID_LOCAL_CATEGORIES: str = "summaries,entities"
     HYBRID_REMOTE_CATEGORIES: str = "concepts,decisions"
     HYBRID_MAX_LOCAL_FILES: int = 150
     HYBRID_ENABLE_SYNTHESIS_PASS: bool = True
 
     model_config = SettingsConfigDict(
-        env_file=_ENV_FILES,
+        env_file=_ENV_FILE if _ENV_FILE else None,
         env_file_encoding="utf-8",
         extra="ignore"
     )
 
 settings = Settings()
+
+
+def get_env_var(key: str, default: str = "") -> str:
+    """Read a setting directly from the live .env file on disk, falling back to os.getenv/settings.
+    
+    This ensures model changes or rate limit tweaks in .env take effect immediately
+    without requiring a full process or worker restart.
+    """
+    env_file = _find_env_file()
+    if env_file and os.path.exists(env_file):
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("#") or not line:
+                        continue
+                    if line.startswith(f"{key}="):
+                        val = line.split("=", 1)[1].strip()
+                        if not (val.startswith('"') and val.endswith('"')) and not (val.startswith("'") and val.endswith("'")):
+                            val = val.split("#", 1)[0].strip()
+                        else:
+                            val = val[1:-1].strip()
+                        if val:
+                            return val
+        except Exception:
+            pass
+    return os.environ.get(key) or (str(getattr(settings, key)) if hasattr(settings, key) else default)
+
+

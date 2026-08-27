@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils';
 import React from 'react';
 
 interface NebulaCardProps extends React.HTMLAttributes<HTMLDivElement> {
-  glow?: 'purple' | 'cyan' | 'amber' | 'green' | 'none';
+  glow?: 'purple' | 'cyan' | 'amber' | 'green' | 'red' | 'none';
   title?: string;
   description?: string;
 }
@@ -20,6 +20,7 @@ export function NebulaCard({
     cyan: 'hover:border-stellar/50 hover:shadow-[0_0_20px_rgba(6,182,212,0.3)]',
     amber: 'hover:border-pulsar/50 hover:shadow-[0_0_20px_rgba(245,158,11,0.3)]',
     green: 'hover:border-orbit/50 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)]',
+    red: 'hover:border-red-500/50 hover:shadow-[0_0_20px_rgba(239,68,68,0.3)]',
     none: ''
   };
 

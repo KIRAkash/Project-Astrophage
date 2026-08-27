@@ -4,7 +4,7 @@ import { SourceUrlInput } from '@/components/source-url-input';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { OrbitLoader } from '@/components/space/orbit-loader';
-import { SourceType } from '@/types/kb';
+import { SourceItem } from '@/types/kb';
 
 import { api } from '@/lib/api';
 
@@ -13,16 +13,18 @@ export default function NewAppPage({ params }: { params: { orgId: string } }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState('');
-  const [sources, setSources] = useState<{ type: SourceType; url: string }[]>([{ type: 'github', url: '' }]);
+  const [sources, setSources] = useState<SourceItem[]>([
+    { type: 'github', url: '', incrementalEnabled: true, config: {} }
+  ]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      const validSources = sources.filter(s => s.url.trim() !== '');
+      const validSources = sources.filter(s => s.type === 'upload' || (s.url && s.url.trim() !== ''));
       if (validSources.length === 0) {
-        throw new Error("Please provide at least one source URL");
+        throw new Error("Please provide at least one valid source connector URL or file");
       }
       const newKb = await api.createApp(params.orgId, {
         appName: name,
@@ -35,6 +37,7 @@ export default function NewAppPage({ params }: { params: { orgId: string } }) {
       setLoading(false);
     }
   };
+
 
   return (
     <div className="p-8 max-w-3xl mx-auto space-y-8">

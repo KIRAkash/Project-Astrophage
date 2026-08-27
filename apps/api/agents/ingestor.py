@@ -4,8 +4,8 @@ import re
 
 from ..core.config import settings
 from ..services.source_ingestion import ingest_source
-from ..services.local_storage import upload_content
-from .llm_client import llm_client
+from ..services.local_storage import upload_content, load_kb_content
+from .llm_client import llm_client, get_env_var
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ async def _reduce_summaries(summaries: list, force_mode=None) -> str:
 # Main ingestor entry point
 # ---------------------------------------------------------------------------
 
-async def run_ingestor(context, sources: list, tokens: dict, log_callback=None) -> tuple:
+async def run_ingestor(context, sources: list = None, tokens: dict = None, log_callback=None) -> tuple:
     """Ingest all sources and produce (architecture_index, raw_content).
 
     Strategy by AI_MODE:
@@ -150,42 +150,66 @@ async def run_ingestor(context, sources: list, tokens: dict, log_callback=None) 
                concurrent, reduce=remote
       hybrid — MAP=local (Gemma, cheap), REDUCE=remote (Gemini, full context)
     """
-    raw_content = ""
-
-    for source in sources:
-        s_type = source.get('type') if isinstance(source, dict) else getattr(source, 'type', None)
-        s_url = source.get('url') if isinstance(source, dict) else getattr(source, 'url', None)
-
+    sources = sources or []
+    tokens = tokens or {}
+    
+    # ── Checkpoint Check ──────────────────────────────────────────────────────
+    cached_raw = load_kb_content(context.kb_id, "raw_ingest.txt")
+    cached_index = load_kb_content(context.kb_id, "architecture_index.md")
+    if cached_raw and cached_index:
+        logger.info(f"⚡ [RESUME] Found existing ingestion checkpoint for KB {context.kb_id}. Skipping map-reduce.")
         if log_callback:
-            await log_callback("source_scanning", {"source": s_url, "type": s_type})
+            await log_callback("checkpoint_resumed", {
+                "step": "ingestion",
+                "raw_chars": len(cached_raw),
+                "index_chars": len(cached_index)
+            })
+        return cached_index, cached_raw
 
-        def _on_progress(event_name, data):
+    raw_content = context.raw_content or cached_raw or ""
+
+    if not raw_content and sources:
+        for source in sources:
+            s_type = source.get('type') if isinstance(source, dict) else getattr(source, 'type', None)
+            s_url = source.get('url') if isinstance(source, dict) else getattr(source, 'url', None)
+            s_config = source.get('config') if isinstance(source, dict) else getattr(source, 'config', None)
+
             if log_callback:
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.create_task(log_callback(event_name, data))
-                except Exception:
-                    pass
+                await log_callback("source_scanning", {"source": s_url, "type": s_type})
 
+            def _on_progress(event_name, data):
+                if log_callback:
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            asyncio.create_task(log_callback(event_name, data))
+                    except Exception:
+                        pass
+
+            try:
+                content = await ingest_source(s_type, s_url, tokens, config=s_config, on_progress=_on_progress)
+                raw_content += f"\n\n=== SOURCE: {s_url} ===\n{content}"
+                if log_callback:
+                    await log_callback("source_downloaded", {"source": s_url, "chars": len(content)})
+            except Exception as e:
+                raw_content += f"\n\n=== SOURCE: {s_url} ===\n[Ingestion failed: {e}]"
+
+
+        # Archive raw content
         try:
-            content = await ingest_source(s_type, s_url, tokens, on_progress=_on_progress)
-            raw_content += f"\n\n=== SOURCE: {s_url} ===\n{content}"
+            gcs_path = upload_content(context.kb_id, "raw_ingest.txt", raw_content)
             if log_callback:
-                await log_callback("source_downloaded", {"source": s_url, "chars": len(content)})
+                await log_callback("archive_uploaded", {"path": gcs_path, "filename": "raw_ingest.txt"})
         except Exception as e:
-            raw_content += f"\n\n=== SOURCE: {s_url} ===\n[Ingestion failed: {e}]"
+            logger.warning(f"Local archive save failed: {e}")
 
-    # Archive raw content
-    try:
-        gcs_path = upload_content(context.kb_id, "raw_ingest.txt", raw_content)
-        if log_callback:
-            await log_callback("archive_uploaded", {"path": gcs_path, "filename": "raw_ingest.txt"})
-    except Exception as e:
-        logger.warning(f"Local archive save failed: {e}")
 
-    mode = settings.AI_MODE
-    model_label = settings.GEMMA_MODEL if mode == "local" else settings.GEMINI_MODEL
+    mode = get_env_var("AI_MODE", getattr(settings, "AI_MODE", "remote"))
+    model_label = (
+        get_env_var("GEMMA_MODEL", getattr(settings, "GEMMA_MODEL", "gemma"))
+        if mode == "local"
+        else get_env_var("GEMINI_MODEL", getattr(settings, "GEMINI_MODEL", "gemini-3.5-flash-lite"))
+    )
     if log_callback:
         await log_callback("llm_analysis_started", {
             "mode": mode,

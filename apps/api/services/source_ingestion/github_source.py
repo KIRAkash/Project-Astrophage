@@ -1,12 +1,12 @@
 import asyncio
 import base64
 import logging
-from typing import Callable, Optional, Dict, Any
+from typing import Callable, Optional, Dict, Any, List
 
 import httpx
 
 from ...core.config import settings
-from .base import BaseConnector, IngestionError, IngestionAuthError, IngestionRateLimitError
+from .base import BaseConnector, IncrementalDelta, IngestionError, IngestionAuthError, IngestionRateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,6 @@ JUNK_FILENAMES = {
 
 MAX_FILE_SIZE = 50 * 1024  # 50 KB per file
 
-# Priority tiers for file selection when MAX_FILES cap is hit.
-# Lower number = higher priority.
 _PRIORITY = {
     '.py': 1, '.ts': 1, '.tsx': 1, '.js': 1, '.jsx': 1,
     '.go': 1, '.java': 1, '.kt': 1, '.rs': 1, '.swift': 1,
@@ -49,14 +47,11 @@ _PRIORITY = {
     '.html': 5, '.css': 5, '.scss': 5,
 }
 
-
 def _mode_max_files() -> int:
     """Return the file ingestion cap for the current AI mode."""
     if settings.AI_MODE == "remote":
-        return settings.REMOTE_MAX_PAGES  # reuse, or we could add REMOTE_MAX_FILES
-    # local or hybrid
-    return settings.LOCAL_MAX_FILES
-
+        return getattr(settings, "REMOTE_MAX_PAGES", 25)
+    return getattr(settings, "LOCAL_MAX_FILES", 150)
 
 def _prioritise_files(paths: list) -> list:
     """Sort files by type priority, then alphabetically, and apply the mode cap."""
@@ -70,105 +65,118 @@ def _prioritise_files(paths: list) -> list:
     sorted_paths = sorted(paths, key=lambda p: (_score(p), p))
     return sorted_paths[:cap]
 
-
 class GitHubConnector(BaseConnector):
     async def ingest(
         self,
         url: str,
         token: Optional[str],
+        config: Optional[Dict[str, Any]] = None,
         on_progress: Optional[Callable[[str, Dict[str, Any]], Any]] = None
     ) -> str:
-        parts = url.rstrip('/').split('/')
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "Astrophage-Ingestor"
+        }
+        if token and not token.startswith("ghp_dummy"):
+            headers["Authorization"] = f"token {token}"
+        else:
+            try:
+                from ..gitops import get_github_app_installation_token
+                app_token = get_github_app_installation_token()
+                if app_token:
+                    headers["Authorization"] = f"token {app_token}"
+            except Exception:
+                pass
+
+        parts = url.rstrip("/").split("/")
         if len(parts) < 2:
-            raise IngestionError("Invalid GitHub repository URL")
+            raise IngestionError(f"Invalid GitHub URL: {url}")
         owner, repo = parts[-2], parts[-1]
 
-        use_token = bool(token) and not token.startswith("ghp_dummy")
-        auth_headers = {'Accept': 'application/vnd.github.v3+json'}
-        if use_token:
-            auth_headers['Authorization'] = f'token {token}'
+        # ── Step 1: Get default branch ────────────────────────────────────
+        repo_api_url = f"https://api.github.com/repos/{owner}/{repo}"
+        async with self.semaphore:
+            r = await self.client.get(repo_api_url, headers=headers)
 
-        base_api_url = f"https://api.github.com/repos/{owner}/{repo}"
-        logger.info(f"Connecting to GitHub repository: {owner}/{repo}")
+        if r.status_code == 404:
+            raise IngestionError(f"GitHub repository not found: {owner}/{repo}")
+        elif r.status_code in (401, 403):
+            raise IngestionAuthError(f"GitHub authentication failed: {r.text}")
+        elif r.status_code == 429:
+            raise IngestionRateLimitError("GitHub rate limit exceeded")
+        elif r.status_code != 200:
+            raise IngestionError(f"GitHub API error: {r.status_code} {r.text}")
 
-        # ── Resolve default branch ────────────────────────────────────────
-        default_branch = "main"
-        try:
-            r = await self.client.get(base_api_url, headers=auth_headers)
-            if r.status_code == 401 and use_token:
-                # Token rejected — fall back to public access or raise IngestionAuthError
-                auth_headers.pop('Authorization', None)
-                r = await self.client.get(base_api_url, headers=auth_headers)
-            
-            if r.status_code in (401, 403):
-                raise IngestionAuthError(f"GitHub authentication failed: {r.text}")
-            elif r.status_code == 429:
-                raise IngestionRateLimitError("GitHub rate limit exceeded")
-            elif r.status_code == 200:
-                default_branch = r.json().get('default_branch', 'main')
-        except (IngestionAuthError, IngestionRateLimitError):
-            raise
-        except Exception as e:
-            logger.warning(f"Could not resolve default branch for {owner}/{repo}: {e}")
+        default_branch = (config or {}).get("branch") or r.json().get("default_branch", "main")
 
-        # ── Fetch repo tree ───────────────────────────────────────────────
-        tree_data = []
-        for branch in [default_branch, 'main', 'master']:
-            try:
-                r = await self.client.get(f"{base_api_url}/git/trees/{branch}?recursive=1", headers=auth_headers)
-                if r.status_code == 200:
-                    tree_data = r.json().get('tree', [])
-                    break
-            except Exception:
-                continue
+        # ── Step 2: Get recursive Git Tree ────────────────────────────────
+        tree_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1"
+        async with self.semaphore:
+            r = await self.client.get(tree_url, headers=headers)
 
-        if not tree_data:
-            raise IngestionError(f"Could not fetch tree for {owner}/{repo}")
+        if r.status_code != 200:
+            raise IngestionError(f"Failed to fetch git tree for {owner}/{repo}: {r.text}")
 
-        # ── Filter and prioritise files ───────────────────────────────────
+        tree_data = r.json()
+        raw_tree = tree_data.get("tree", [])
+
+        # ── Step 3: Filter files ──────────────────────────────────────────
         candidate_paths = []
-        for item in tree_data:
-            if item.get('type') != 'blob':
+        for item in raw_tree:
+            if item.get("type") != "blob":
                 continue
-            path = item.get('path', '')
-            filename = path.split('/')[-1]
-            if filename in JUNK_FILENAMES:
+            path = item.get("path", "")
+            size = item.get("size", 0)
+
+            # Skip large files
+            if size > MAX_FILE_SIZE:
                 continue
-            if any(skip in path.split('/') for skip in SKIP_DIRS):
+
+            # Skip junk files
+            if path.split('/')[-1] in JUNK_FILENAMES:
                 continue
+
+            # Skip excluded directories
+            path_segments = set(path.split("/"))
+            if path_segments & SKIP_DIRS:
+                continue
+
+            # Keep only allowed extensions
             if any(path.endswith(ext) for ext in ALLOWED_EXTENSIONS):
                 candidate_paths.append(path)
 
+        # ── Step 4: Prioritise and cap ────────────────────────────────────
         files_to_process = _prioritise_files(candidate_paths)
-        logger.info(
-            f"Repository {owner}/{repo}: {len(candidate_paths)} candidate files, "
-            f"processing {len(files_to_process)} (mode={settings.AI_MODE})"
-        )
 
         if on_progress:
             try:
                 on_progress("source_files_found", {
                     "source": url,
-                    "owner": owner,
-                    "repo": repo,
                     "file_count": len(files_to_process),
+                    "total_in_tree": len(raw_tree),
                 })
             except Exception:
                 pass
 
-        # ── Concurrent file fetch with semaphore ──────────────────────────
-        results: dict[str, str] = {}
+        logger.info(
+            f"Fetching {len(files_to_process)}/{len(candidate_paths)} candidate files "
+            f"from {owner}/{repo} (mode={settings.AI_MODE})..."
+        )
 
-        async def _fetch_file(path: str) -> None:
+        # ── Step 5: Fetch file contents concurrently ──────────────────────
+        results = {}
+
+        async def _fetch_file(path: str):
+            content_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={default_branch}"
             async with self.semaphore:
                 try:
-                    r = await self.client.get(f"{base_api_url}/contents/{path}", headers=auth_headers)
+                    r = await self.client.get(content_url, headers=headers)
                     if r.status_code == 200:
                         file_data = r.json()
-                        if 'content' in file_data:
-                            raw = base64.b64decode(file_data['content']).decode('utf-8', errors='replace')
-                            if len(raw) > MAX_FILE_SIZE:
-                                raw = raw[:MAX_FILE_SIZE] + "\n...[TRUNCATED]"
+                        encoding = file_data.get("encoding", "")
+                        raw_encoded = file_data.get("content", "")
+                        if encoding == "base64" and raw_encoded:
+                            raw = base64.b64decode(raw_encoded).decode("utf-8", errors="replace")
                             results[path] = raw
                         else:
                             results[path] = "[Binary or unreadable content]"
@@ -206,12 +214,97 @@ class GitHubConnector(BaseConnector):
 
         return content
 
+    async def check_incremental_updates(
+        self,
+        url: str,
+        token: Optional[str],
+        last_state: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None
+    ) -> IncrementalDelta:
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "Astrophage-Ingestor"
+        }
+        if token and not token.startswith("ghp_dummy"):
+            headers["Authorization"] = f"token {token}"
+
+        parts = url.rstrip("/").split("/")
+        if len(parts) < 2:
+            raise IngestionError(f"Invalid GitHub URL: {url}")
+        owner, repo = parts[-2], parts[-1]
+
+        commits_url = f"https://api.github.com/repos/{owner}/{repo}/commits"
+        async with self.semaphore:
+            r = await self.client.get(commits_url, headers=headers, params={"per_page": 5})
+
+        if r.status_code in (401, 403):
+            raise IngestionAuthError(f"GitHub auth failed: {r.text}")
+        elif r.status_code != 200:
+            raise IngestionError(f"Error checking GitHub commits: {r.text}")
+
+        commits = r.json()
+        if not commits or not isinstance(commits, list):
+            return IncrementalDelta(
+                has_changes=False,
+                summary=f"No commits found in repo {owner}/{repo}",
+                new_state=last_state or {},
+                source_type="github",
+                source_url=url,
+            )
+
+        latest = commits[0]
+        latest_sha = latest.get("sha", "")
+        last_sha = (last_state or {}).get("last_commit_sha") or (last_state or {}).get("sha")
+
+        if last_sha and latest_sha == last_sha:
+            return IncrementalDelta(
+                has_changes=False,
+                summary=f"No new commits on {owner}/{repo} (HEAD: {latest_sha[:7]})",
+                new_state=last_state or {},
+                source_type="github",
+                source_url=url,
+            )
+
+        # Fetch commit details / diff
+        commit_detail_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{latest_sha}"
+        async with self.semaphore:
+            cr = await self.client.get(commit_detail_url, headers=headers)
+
+        commit_data = cr.json() if cr.status_code == 200 else {}
+        commit_msg = commit_data.get("commit", {}).get("message", "").split("\n")[0]
+        author = commit_data.get("commit", {}).get("author", {}).get("name", "Unknown")
+        files = commit_data.get("files", [])
+
+        diff_parts = []
+        changed_filenames = []
+        for f in files:
+            fname = f.get("filename", "")
+            changed_filenames.append(fname)
+            patch = f.get("patch", "")
+            if patch:
+                diff_parts.append(f"--- File: {fname} ---\n{patch}")
+            else:
+                diff_parts.append(f"--- File: {fname} ({f.get('status', 'modified')}) ---")
+
+        diff_text = "\n\n".join(diff_parts)
+
+        return IncrementalDelta(
+            has_changes=True,
+            delta_content=diff_text,
+            summary=f"Commit {latest_sha[:7]} by {author}: '{commit_msg}' ({len(changed_filenames)} files changed)",
+            new_state={"last_commit_sha": latest_sha, "commit_message": commit_msg, "author": author},
+            affected_items=changed_filenames,
+            source_type="github",
+            source_url=url,
+            author=author,
+        )
 
 async def fetch_github_repo(
     repo_url: str,
     github_token: str,
+    config: Optional[Dict[str, Any]] = None,
     on_progress: Optional[Callable[[str, dict], None]] = None,
 ) -> str:
     async with httpx.AsyncClient(timeout=30.0) as client:
         connector = GitHubConnector(client, concurrency_limit=10)
-        return await connector.ingest(repo_url, github_token, on_progress=on_progress)
+        return await connector.ingest(repo_url, github_token, config=config, on_progress=on_progress)

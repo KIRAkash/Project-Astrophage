@@ -16,13 +16,14 @@ Key design points:
     "remote"  -> always Gemini Flash
 """
 
+import os
 import asyncio
 import logging
 from typing import Literal, Optional
 
 import httpx
 
-from ..core.config import settings
+from ..core.config import settings, get_env_var
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +40,12 @@ class LLMClient:
     # ── Mode resolution ─────────────────────────────────────────────────────
 
     def _effective_mode(self, force_mode: ForceMode) -> Literal["local", "remote"]:
-        """Resolve the effective mode for a single call.
-
-        - hybrid + no force_mode  → "remote" (safe default)
-        - hybrid + force_mode     → honour force_mode
-        - local / remote          → use settings.AI_MODE unless force_mode overrides
-        """
-        if force_mode is not None:
+        """Resolve the active execution mode for a single call."""
+        if force_mode in ("local", "remote"):
             return force_mode
-        if settings.AI_MODE in ("local", "remote"):
-            return settings.AI_MODE
+        active_ai_mode = get_env_var("AI_MODE", getattr(settings, "AI_MODE", "remote"))
+        if active_ai_mode in ("local", "remote"):
+            return active_ai_mode
         return "remote"   # hybrid default
 
     # ── Client accessors ────────────────────────────────────────────────────
@@ -105,28 +102,60 @@ class LLMClient:
     async def generate_batch(
         self,
         items: list,
-        semaphore_limit: int = 8,
+        semaphore_limit: int = None,
         force_mode: ForceMode = None,
     ) -> list:
-        """Run multiple generate() calls concurrently with a semaphore cap.
+        """Run multiple generate() calls with rate limiting and concurrency control.
 
         Args:
             items:           List of dicts. Required key: "prompt".
                              Optional keys: "system", "force_json", "num_ctx_override".
-            semaphore_limit: Max concurrent LLM calls (prevents 429 storms for Gemini).
+            semaphore_limit: Max concurrent LLM calls.
             force_mode:      Passed through to every generate() call.
         """
-        sem = asyncio.Semaphore(semaphore_limit)
+        effective_mode = self._effective_mode(force_mode)
+        is_safe_mode = get_env_var("GEMINI_RATE_LIMIT_SAFE_MODE", "true").lower() in ("true", "1", "yes")
+        try:
+            delay_seconds = float(get_env_var("GEMINI_REQUEST_DELAY_SECONDS", "1.5"))
+        except ValueError:
+            delay_seconds = 1.5
 
-        async def _guarded(item: dict) -> str:
-            async with sem:
-                return await self.generate(
+        # In safe mode on remote, serialize with pacing delays to prevent 429 quota exhaustion
+        if effective_mode == "remote" and is_safe_mode:
+            logger.info(f"[llm_client] Safe mode active: executing {len(items)} remote requests sequentially with pacing delays.")
+            results = []
+            for item in items:
+                res = await self.generate(
                     prompt=item["prompt"],
                     system=item.get("system", ""),
                     force_json=item.get("force_json", False),
                     force_mode=force_mode,
                     num_ctx_override=item.get("num_ctx_override"),
                 )
+                results.append(res)
+                if delay_seconds > 0:
+                    await asyncio.sleep(delay_seconds)
+            return results
+
+        try:
+            max_conc = int(get_env_var("GEMINI_MAX_CONCURRENCY", "2"))
+        except ValueError:
+            max_conc = 2
+        limit = semaphore_limit or max_conc or getattr(settings, "REMOTE_SEMAPHORE_LIMIT", 2)
+        sem = asyncio.Semaphore(limit)
+
+        async def _guarded(item: dict) -> str:
+            async with sem:
+                res = await self.generate(
+                    prompt=item["prompt"],
+                    system=item.get("system", ""),
+                    force_json=item.get("force_json", False),
+                    force_mode=force_mode,
+                    num_ctx_override=item.get("num_ctx_override"),
+                )
+                if effective_mode == "remote" and delay_seconds > 0:
+                    await asyncio.sleep(delay_seconds)
+                return res
 
         return list(await asyncio.gather(*[_guarded(item) for item in items]))
 
@@ -147,9 +176,10 @@ class LLMClient:
         client = await self._get_ollama_client()
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
         num_ctx = num_ctx_override or 16384
+        model_name = get_env_var("GEMMA_MODEL", getattr(settings, "GEMMA_MODEL", "gemma4:12b"))
 
         payload: dict = {
-            "model": settings.GEMMA_MODEL,
+            "model": model_name,
             "prompt": full_prompt,
             "stream": False,
             "options": {"num_ctx": num_ctx},
@@ -183,22 +213,28 @@ class LLMClient:
         force_json: bool,
     ) -> str:
         """Call Gemini using the google-genai SDK via the natively-async client.aio interface."""
+        import random
         from google.genai import types
 
         client = self._get_gemini_client()
+        model_name = get_env_var("GEMINI_MODEL", getattr(settings, "GEMINI_MODEL", "gemini-3.5-flash-lite"))
+        logger.info(f"[llm_client/remote] Invoking Gemini model: '{model_name}'")
 
         # Both system_instruction and response_mime_type live in GenerateContentConfig
-        config_kwargs: dict = {}
+        config_kwargs: dict = {
+            "automatic_function_calling": types.AutomaticFunctionCallingConfig(disable=True),
+            "max_output_tokens": 8192,
+        }
         if system:
             config_kwargs["system_instruction"] = system
         if force_json:
             config_kwargs["response_mime_type"] = "application/json"
-        config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
+        config = types.GenerateContentConfig(**config_kwargs)
 
-        for attempt in range(4):
+        for attempt in range(5):
             try:
                 response = await client.aio.models.generate_content(
-                    model=settings.GEMINI_MODEL,
+                    model=model_name,
                     contents=prompt,
                     config=config,
                 )
@@ -207,9 +243,14 @@ class LLMClient:
                 err_str = str(e)
                 is_rate_limit = any(tok in err_str for tok in ("429", "RESOURCE_EXHAUSTED", "quota"))
                 is_transient  = any(tok in err_str for tok in ("503", "UNAVAILABLE", "DNS", "timeout"))
-                if (is_rate_limit or is_transient) and attempt < 3:
-                    wait = 15 * (attempt + 1)
-                    logger.warning(f"Gemini transient error (attempt {attempt+1}), waiting {wait}s: {e}")
+                if (is_rate_limit or is_transient) and attempt < 4:
+                    # Jittered exponential backoff: avoids thundering herd on quota reset
+                    base_wait = 12 * (2 ** attempt) if is_rate_limit else 5 * (attempt + 1)
+                    wait = base_wait + random.uniform(1.0, 5.0)
+                    logger.warning(
+                        f"Gemini {'rate limit (429)' if is_rate_limit else 'transient error'} (attempt {attempt+1}/5), "
+                        f"backing off for {wait:.1f}s: {e}"
+                    )
                     await asyncio.sleep(wait)
                 else:
                     logger.error(f"Gemini generation failed: {e}")

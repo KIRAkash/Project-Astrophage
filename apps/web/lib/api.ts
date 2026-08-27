@@ -19,7 +19,26 @@ export const api = {
   createApp: (orgId: string, data: Partial<KnowledgeBase>) => apiFetch(`/api/orgs/${orgId}/apps`, { method: 'POST', body: JSON.stringify(data) }) as Promise<KnowledgeBase>,
   getKB: (id: string) => apiFetch(`/api/kb/${id}`) as Promise<KnowledgeBase & { events: any[] }>,
   syncKB: (id: string) => apiFetch(`/api/kb/${id}/sync`, { method: 'POST' }) as Promise<KnowledgeBase & { events: any[] }>,
+  checkKBUpdates: (id: string) => apiFetch(`/api/kb/${id}/check-updates`, { method: 'POST' }) as Promise<{
+    status: string;
+    message?: string;
+    sources_scanned?: {
+      source_type: string;
+      source_url: string;
+      status: string;
+      summary?: string;
+      affected_items?: string[];
+      message?: string;
+    }[];
+    triggered_count?: number;
+    commit_sha?: string;
+    commit_message?: string;
+    author?: string;
+    files_changed?: string[];
+  }>,
+
   restartKB: (id: string) => apiFetch(`/api/kb/${id}/restart`, { method: 'POST' }) as Promise<KnowledgeBase & { events: any[] }>,
+  retryKB: (id: string) => apiFetch(`/api/kb/${id}/retry`, { method: 'POST' }) as Promise<KnowledgeBase & { events: any[] }>,
   listKBs: () => apiFetch('/api/kb') as Promise<KnowledgeBase[]>,
   getKBTree: (id: string) => apiFetch(`/api/kb/${id}/tree`) as Promise<{tree: {path: string, type: string, sha: string}[]}>,
   getKBFile: (id: string, path: string) => apiFetch(`/api/kb/${id}/file?path=${encodeURIComponent(path)}`) as Promise<{content: string}>,

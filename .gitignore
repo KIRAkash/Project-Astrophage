@@ -9,6 +9,7 @@ logdir/
 .DS_Store
 .idea/
 .vscode/
+.agents/
 *.swp
 dist/
 build/
@@ -16,5 +17,19 @@ build/
 __pycache__/
 # Next.js build output
 .next/
+**/.next/
 out/
 apps/web/.next/
+*.tsbuildinfo
+apps/api/.venv/
+apps/video
+
+# Sensitive keys and certs
+*.pem
+*.key
+*.cert
+*.crt
+skills-lock.json
+
+scripts/
+output/

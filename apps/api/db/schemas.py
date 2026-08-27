@@ -27,8 +27,31 @@ class OrgResponse(CamelModel):
     created_at: datetime
 
 class SourceUrlItem(CamelModel):
-    type: Literal['github', 'confluence', 'notion', 'jira', 'upload']
+    type: Literal['github', 'confluence', 'notion', 'jira', 'slack', 'upload']
     url: str
+    incremental_enabled: Optional[bool] = True
+    config: Optional[Dict[str, Any]] = None
+
+class SourceMonitorResponse(CamelModel):
+    id: UUID
+    kb_id: UUID
+    source_type: str = "github"
+    repo_url: str
+    source_url: Optional[str] = None
+    incremental_enabled: bool = True
+    monitor_mode: str = "webhook"
+    last_commit_sha: Optional[str] = None
+    last_sync_state: Dict[str, Any] = {}
+    config: Dict[str, Any] = {}
+    last_synced_at: Optional[datetime] = None
+
+class SourceCheckResult(CamelModel):
+    source_type: str
+    source_url: str
+    has_changes: bool
+    summary: str
+    affected_items: List[str] = []
+    decision: Optional[str] = None
 
 class KBCreate(CamelModel):
     app_name: str
@@ -56,6 +79,8 @@ class KBEventResponse(CamelModel):
 
 class KBDetailResponse(KBResponse):
     events: List[KBEventResponse] = []
+    source_monitors: List[SourceMonitorResponse] = []
+
 
 class OrgTreeNode(OrgResponse):
     children: List['OrgTreeNode'] = []

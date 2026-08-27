@@ -44,7 +44,19 @@ def generation_pipeline_task(self, kb_id: str):
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
-def gatekeeper_pipeline_task(self, kb_id: str, diff: str):
+def gatekeeper_pipeline_task(
+    self,
+    kb_id: str,
+    diff: str,
+    commit_sha: str = None,
+    commit_message: str = None,
+    source_type: str = "github",
+    source_url: str = None,
+    affected_items: list = None,
+    author: str = None,
+    summary: str = None,
+    **kwargs
+):
     from .db_session import get_db_sync
     from ..services.sse import SSEManager
     from ..agents.runner import run_gatekeeper_pipeline
@@ -52,7 +64,19 @@ def gatekeeper_pipeline_task(self, kb_id: str, diff: str):
         async def _execute():
             async with get_db_sync() as db:
                 sse = SSEManager()
-                await run_gatekeeper_pipeline(kb_id, diff, db, sse)
+                await run_gatekeeper_pipeline(
+                    kb_id,
+                    diff,
+                    db,
+                    sse,
+                    commit_sha=commit_sha,
+                    commit_message=commit_message,
+                    source_type=source_type,
+                    source_url=source_url,
+                    affected_items=affected_items,
+                    author=author,
+                    summary=summary,
+                )
         _run_async(_execute())
     except Exception as exc:
         logger.exception(f"gatekeeper_pipeline_task failed for {kb_id}: {exc}")
@@ -77,47 +101,68 @@ def rollup_pipeline_task(self, org_id: str):
 
 @celery_app.task
 def poll_sources():
-    """Polling fallback for Flow B — compares current HEAD SHA against stored last_commit_sha."""
+    """Universal polling worker for Flow B — checks all active sources (GitHub, Confluence, Notion, Slack, Jira)."""
     from .db_session import get_db_sync
     from ..services.sse import SSEManager
     from ..agents.runner import run_gatekeeper_pipeline
     from ..db.models import SourceMonitor, MonitorMode
+    from ..services.source_ingestion import check_source_updates
     from sqlalchemy import select
-    from github import Github
+    from datetime import datetime
 
     async def _poll():
-        db = get_db_sync()
-        sse = SSEManager()
-        g = Github(settings.GITHUB_APP_TOKEN)
+        async with get_db_sync() as db:
+            sse = SSEManager()
 
-        result = await db.execute(
-            select(SourceMonitor).where(SourceMonitor.monitor_mode == MonitorMode.polling)
-        )
-        monitors = result.scalars().all()
+            result = await db.execute(
+                select(SourceMonitor).where(
+                    (SourceMonitor.incremental_enabled == True) &
+                    (SourceMonitor.monitor_mode == MonitorMode.polling)
+                )
+            )
+            monitors = result.scalars().all()
 
-        for monitor in monitors:
-            try:
-                repo_name = "/".join(monitor.repo_url.rstrip("/").split("/")[-2:])
-                repo = g.get_repo(repo_name)
-                latest_sha = repo.get_commits()[0].sha
+            for monitor in monitors:
+                try:
+                    last_state = monitor.last_sync_state or {}
+                    if monitor.last_commit_sha and "last_commit_sha" not in last_state:
+                        last_state["last_commit_sha"] = monitor.last_commit_sha
 
-                if latest_sha != monitor.last_commit_sha:
-                    logger.info(f"New commit on {repo_name}: {latest_sha}")
-                    # Get diff for the new commit
-                    commit = repo.get_commit(latest_sha)
-                    diff_parts = []
-                    for f in commit.files:
-                        if f.patch:
-                            diff_parts.append(f"File: {f.filename}\nPatch:\n{f.patch}")
-                    diff = "\n\n".join(diff_parts)
+                    delta = await check_source_updates(
+                        source_type=monitor.source_type,
+                        url=monitor.target_url,
+                        last_state=last_state,
+                        config=monitor.config or {},
+                    )
 
-                    monitor.last_commit_sha = latest_sha
-                    await db.commit()
+                    if delta.has_changes and delta.delta_content:
+                        logger.info(f"Incremental change detected on {monitor.source_type} ({monitor.target_url}): {delta.summary}")
+                        monitor.last_sync_state = delta.new_state
+                        if "last_commit_sha" in delta.new_state:
+                            monitor.last_commit_sha = delta.new_state["last_commit_sha"]
+                        monitor.last_synced_at = datetime.utcnow()
+                        await db.commit()
 
-                    # Trigger gatekeeper
-                    await run_gatekeeper_pipeline(str(monitor.kb_id), diff, db, sse)
-            except Exception as e:
-                logger.warning(f"Poll failed for {monitor.repo_url}: {e}")
+                        # Trigger Gatekeeper Pipeline
+                        await run_gatekeeper_pipeline(
+                            kb_id=str(monitor.kb_id),
+                            diff=delta.delta_content,
+                            db=db,
+                            sse=sse,
+                            commit_sha=delta.new_state.get("last_commit_sha") or delta.new_state.get("latest_ts"),
+                            commit_message=delta.summary,
+                            source_type=delta.source_type,
+                            source_url=delta.source_url,
+                            affected_items=delta.affected_items,
+                            author=delta.author,
+                            summary=delta.summary,
+                        )
+                    else:
+                        monitor.last_synced_at = datetime.utcnow()
+                        await db.commit()
+
+                except Exception as e:
+                    logger.warning(f"Poll failed for {monitor.source_type} ({monitor.target_url}): {e}")
 
     _run_async(_poll())
 
@@ -130,3 +175,4 @@ if settings.SOURCE_MONITOR_MODE == 'polling':
             'schedule': 300.0,  # Every 5 minutes
         },
     }
+

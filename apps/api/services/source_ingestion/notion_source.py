@@ -1,12 +1,37 @@
 import logging
 import re
-from typing import Callable, Optional, Dict, Any
+from typing import Callable, Optional, Dict, Any, List
 import httpx
 import asyncio
+from datetime import datetime
 
-from .base import BaseConnector, IngestionError, IngestionAuthError, IngestionRateLimitError
+from .base import BaseConnector, IncrementalDelta, IngestionError, IngestionAuthError, IngestionRateLimitError
 
 logger = logging.getLogger(__name__)
+
+def _extract_notion_id(url: str, config: Optional[Dict[str, Any]] = None) -> str:
+    """Extract 32-char hex Notion page or database ID from URL or config."""
+    if config and config.get("page_id"):
+        return re.sub(r'[^a-fA-F0-9]', '', str(config["page_id"]))
+    if config and config.get("database_id"):
+        return re.sub(r'[^a-fA-F0-9]', '', str(config["database_id"]))
+
+    cleaned = url.split('?')[0].rstrip('/')
+    match = re.search(r'([a-f0-9]{32})$', cleaned, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    
+    # Try UUID format with dashes
+    match = re.search(r'([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})', cleaned, re.IGNORECASE)
+    if match:
+        return match.group(1).replace('-', '')
+
+    # Fallback to alphanumeric stripping
+    hex_only = re.sub(r'[^a-fA-F0-9]', '', cleaned)
+    if len(hex_only) >= 32:
+        return hex_only[-32:]
+
+    raise IngestionError(f"Invalid Notion URL or ID format: {url}")
 
 class NotionConnector(BaseConnector):
     async def _get_all_children(self, block_id: str, headers: dict) -> list:
@@ -57,37 +82,49 @@ class NotionConnector(BaseConnector):
         self,
         url: str,
         token: Optional[str],
+        config: Optional[Dict[str, Any]] = None,
         on_progress: Optional[Callable[[str, Dict[str, Any]], Any]] = None
     ) -> str:
         if not token:
-            raise IngestionAuthError("Notion token not provided.")
+            raise IngestionAuthError("Notion token not provided (NOTION_API_TOKEN required).")
 
-        match = re.search(r'-([a-f0-9]{32})$', url)
-        if not match:
-            match = re.search(r'([a-f0-9]{32})$', url)
-        if not match:
-            raise IngestionError("Invalid Notion URL format")
-
-        page_id = match.group(1)
+        page_id = _extract_notion_id(url, config)
 
         headers = {
-            'Authorization': f'Bearer {token}',
+            'Authorization': f'Bearer {token}' if not token.startswith('Bearer ') else token,
             'Notion-Version': '2022-06-28',
             'Content-Type': 'application/json'
         }
+
+        # Try to get page title and metadata
+        page_title = f"Notion Page {page_id}"
+        try:
+            page_meta_url = f"https://api.notion.com/v1/pages/{page_id}"
+            async with self.semaphore:
+                pr = await self.client.get(page_meta_url, headers=headers)
+            if pr.status_code == 200:
+                pdata = pr.json()
+                props = pdata.get('properties', {})
+                for prop_name, prop_val in props.items():
+                    if prop_val.get('type') == 'title':
+                        title_arr = prop_val.get('title', [])
+                        if title_arr:
+                            page_title = "".join(t.get('plain_text', '') for t in title_arr)
+                            break
+        except Exception:
+            pass
 
         if on_progress:
             try:
                 on_progress("source_files_found", {
                     "source": url,
                     "page_id": page_id,
+                    "title": page_title,
                     "file_count": 1
                 })
             except Exception:
                 pass
 
-        # Stack holds dictionaries of items to process.
-        # We start by fetching children of the root page_id.
         stack = [{"type": "fetch_children", "block_id": page_id}]
         text_pieces = []
 
@@ -95,7 +132,6 @@ class NotionConnector(BaseConnector):
             item = stack.pop()
             if item["type"] == "fetch_children":
                 children = await self._get_all_children(item["block_id"], headers)
-                # Push children to the stack in reverse order so they are processed in correct forward order.
                 for child in reversed(children):
                     stack.append({"type": "block", "data": child})
             elif item["type"] == "block":
@@ -119,13 +155,68 @@ class NotionConnector(BaseConnector):
             except Exception:
                 pass
 
-        return f"--- Notion Page: {page_id} ---\n\n" + content
+        return f"--- Notion Page: {page_title} (ID: {page_id}) ---\n\n" + content
+
+    async def check_incremental_updates(
+        self,
+        url: str,
+        token: Optional[str],
+        last_state: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None
+    ) -> IncrementalDelta:
+        if not token:
+            raise IngestionAuthError("Notion token not provided.")
+
+        page_id = _extract_notion_id(url, config)
+        headers = {
+            'Authorization': f'Bearer {token}' if not token.startswith('Bearer ') else token,
+            'Notion-Version': '2022-06-28',
+            'Content-Type': 'application/json'
+        }
+
+        # Check page last_edited_time
+        page_meta_url = f"https://api.notion.com/v1/pages/{page_id}"
+        async with self.semaphore:
+            r = await self.client.get(page_meta_url, headers=headers)
+
+        if r.status_code in (401, 403):
+            raise IngestionAuthError(f"Notion auth failed: {r.text}")
+        elif r.status_code != 200:
+            raise IngestionError(f"Error inspecting Notion page: {r.text}")
+
+        page_data = r.json()
+        current_edited_time = page_data.get('last_edited_time', '')
+        last_recorded_time = (last_state or {}).get("last_edited_time", "")
+
+        if last_recorded_time and current_edited_time <= last_recorded_time:
+            return IncrementalDelta(
+                has_changes=False,
+                summary=f"No changes in Notion page {page_id} since {last_recorded_time}",
+                new_state=last_state or {},
+                source_type="notion",
+                source_url=url,
+            )
+
+        # Ingest updated page content
+        updated_content = await self.ingest(url, token, config=config)
+
+        return IncrementalDelta(
+            has_changes=True,
+            delta_content=f"### 📑 Notion Page Updated (Last Edited: {current_edited_time})\n\n{updated_content}",
+            summary=f"Notion page {page_id} updated at {current_edited_time}",
+            new_state={"last_edited_time": current_edited_time, "page_id": page_id},
+            affected_items=[f"notion://{page_id}"],
+            source_type="notion",
+            source_url=url,
+            author="NotionUser",
+        )
 
 async def fetch_notion_page(
     notion_url: str,
     api_token: str,
+    config: Optional[Dict[str, Any]] = None,
     on_progress: Optional[Callable[[str, Dict[str, Any]], Any]] = None
 ) -> str:
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         connector = NotionConnector(client)
-        return await connector.ingest(notion_url, api_token, on_progress=on_progress)
+        return await connector.ingest(notion_url, api_token, config=config, on_progress=on_progress)
