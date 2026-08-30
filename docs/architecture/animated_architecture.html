@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Astrophage - Animated Architecture</title>
+    <style>
+        :root {
+            --bg-color: #05070a;
+            --gcp-color: #4285F4;
+            --agent-color: #10b981;
+            --core-color: #8b5cf6;
+            --source-color: #f59e0b;
+            --llm-color: #EA4335;
+            --gate-color: #ef4444;
+            --local-llm-color: #d97706;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            color: white;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden;
+        }
+
+        /* Space Background Elements */
+        .stars {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: 
+                radial-gradient(2px 2px at 20px 30px, #ffffff, rgba(0,0,0,0)),
+                radial-gradient(2px 2px at 40px 70px, #ffffff, rgba(0,0,0,0)),
+                radial-gradient(2px 2px at 50px 160px, #ffffff, rgba(0,0,0,0)),
+                radial-gradient(2px 2px at 90px 40px, #ffffff, rgba(0,0,0,0)),
+                radial-gradient(2px 2px at 130px 80px, #ffffff, rgba(0,0,0,0));
+            background-repeat: repeat;
+            background-size: 200px 200px;
+            opacity: 0.3;
+            z-index: 0;
+            animation: drift 100s linear infinite;
+        }
+
+        @keyframes drift {
+            from { background-position: 0 0; }
+            to { background-position: -1000px 500px; }
+        }
+
+        .grid-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-size: 50px 50px;
+            background-image: linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
+                              linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
+            z-index: 1;
+        }
+
+        /* Main Container */
+        .container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 40px 60px;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            background: linear-gradient(90deg, #fff, #a5b4fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 0;
+            text-shadow: 0 0 20px rgba(165, 180, 252, 0.4);
+        }
+
+        /* Architecture Layout */
+        .main-stage {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: stretch;
+            flex-grow: 1;
+            margin-bottom: 40px;
+            gap: 20px;
+        }
+
+        .col {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around;
+            align-items: center;
+            flex: 1;
+            gap: 20px;
+        }
+
+        .col-title {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #94a3b8;
+            margin-bottom: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 5px;
+        }
+
+        .bottom-stage {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            gap: 80px;
+            padding: 30px;
+            background: rgba(66, 133, 244, 0.05);
+            border-top: 1px solid rgba(66, 133, 244, 0.2);
+            border-radius: 12px;
+        }
+
+        /* Nodes */
+        .node {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            min-width: 180px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            position: relative;
+            z-index: 20;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .node:hover {
+            transform: translateY(-5px) scale(1.05);
+        }
+
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-8px); }
+            100% { transform: translateY(0px); }
+        }
+
+        .node img {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
+        }
+
+        /* Themed Nodes */
+        .node.source { border-left: 4px solid var(--source-color); }
+        .node.source:hover { box-shadow: 0 0 20px rgba(245, 158, 11, 0.3); }
+        
+        .node.core { border-left: 4px solid var(--core-color); }
+        .node.core:hover { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
+        
+        .node.agent { border-left: 4px solid var(--agent-color); }
+        .node.agent:hover { box-shadow: 0 0 20px rgba(16, 185, 129, 0.3); }
+        
+        .node.llm { border-left: 4px solid var(--llm-color); }
+        .node.llm:hover { box-shadow: 0 0 20px rgba(234, 67, 53, 0.3); }
+        
+        .node.gcp { border-left: 4px solid var(--gcp-color); }
+        .node.gcp:hover { box-shadow: 0 0 20px rgba(66, 133, 244, 0.3); }
+
+        .node.gate { border-left: 4px solid var(--gate-color); }
+        .node.gate:hover { box-shadow: 0 0 20px rgba(239, 68, 68, 0.3); }
+
+        /* SVG Connections */
+        #svg-canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        .link-bg {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.05);
+            stroke-width: 3;
+        }
+
+        .link-anim {
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-dasharray: 8, 16;
+            animation: flowLine 1s linear infinite;
+        }
+
+        @keyframes flowLine {
+            to { stroke-dashoffset: -24; }
+        }
+
+    </style>
+</head>
+<body>
+    <div class="stars"></div>
+    <div class="grid-overlay"></div>
+    
+    <svg id="svg-canvas"></svg>
+
+    <div class="container">
+        <div class="header">
+            <h1>🌌 Project Astrophage Architecture</h1>
+        </div>
+
+        <div class="main-stage">
+            <!-- Column 1: Sources -->
+            <div class="col">
+                <div class="col-title">Data Sources</div>
+                <div class="node source" id="gh">
+                    <img src="../../apps/video/public/assets/sources/github.png" alt="GitHub"> GitHub / Git
+                </div>
+                <div class="node source" id="conf">
+                    <img src="../../apps/video/public/assets/sources/Confluence.png" alt="Confluence"> Confluence
+                </div>
+                <div class="node source" id="notion">
+                    <img src="../../apps/video/public/assets/sources/Notion_app_logo.png" alt="Notion"> Notion
+                </div>
+                <div class="node source" id="slack">
+                    <img src="../../apps/video/public/assets/sources/Slack_icon_2019.svg.webp" alt="Slack"> Slack
+                </div>
+                <div class="node source" id="jira">
+                    <img src="../../apps/video/public/assets/sources/jira-1.svg" alt="Jira"> Jira
+                </div>
+            </div>
+
+            <!-- Column 2: AppCore -->
+            <div class="col">
+                <div class="col-title">Platform Engine</div>
+                <div class="node core" id="api">
+                    <img src="../../apps/video/public/assets/google/cloudrun.png" alt="API" style="filter: grayscale(1) brightness(2);"> FastAPI Backend
+                </div>
+                <div class="node core" id="celery">
+                    <span style="font-size: 20px;">⚙️</span> Celery Workers
+                </div>
+                <div class="node gate" id="atomic">
+                    <span style="font-size: 20px;">🔒</span> Atomic Registry
+                </div>
+                <div class="node gate" id="linter">
+                    <span style="font-size: 20px;">🛡️</span> Pre-PR Linter
+                </div>
+            </div>
+
+            <!-- Column 3: Agents -->
+            <div class="col">
+                <div class="col-title">AI Agent Fleet</div>
+                <div class="node agent" id="ingestor" style="animation-delay: 0.2s">
+                    <span style="font-size: 20px;">🤖</span> Ingestor Agent
+                </div>
+                <div class="node agent" id="gatekeeper" style="animation-delay: 0.4s">
+                    <span style="font-size: 20px;">🤖</span> Gatekeeper Agent
+                </div>
+                <div class="node agent" id="compiler" style="animation-delay: 0.6s">
+                    <span style="font-size: 20px;">🤖</span> Compiler Agent
+                </div>
+                <div class="node agent" id="rollup" style="animation-delay: 0.8s">
+                    <span style="font-size: 20px;">🤖</span> Rollup Agent
+                </div>
+            </div>
+
+            <!-- Column 4: AI Engine -->
+            <div class="col">
+                <div class="col-title">LLM Routing Layer</div>
+                <div class="node core" id="router">
+                    <span style="font-size: 20px;">🚦</span> AI Mode Router
+                </div>
+                <div class="node llm" id="gemini">
+                    <img src="../../apps/video/public/assets/google/Gemini-logo.png" alt="Gemini"> Gemini Flash (Cloud)
+                </div>
+                <div class="node source" id="gemma" style="border-left-color: var(--local-llm-color);">
+                    <img src="../../apps/video/public/assets/stack/gemma-ecosystem__ollama__light.svg" alt="Gemma"> Gemma (Local)
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Row: GCP -->
+        <div class="col-title" style="text-align: center; margin-bottom: 0;">Google Cloud Infrastructure</div>
+        <div class="bottom-stage">
+            <div class="node gcp" id="run">
+                <img src="../../apps/video/public/assets/google/cloudrun.png" alt="Cloud Run"> Cloud Run
+            </div>
+            <div class="node gcp" id="sql">
+                <img src="../../apps/video/public/assets/google/cloudsql.png" alt="Cloud SQL"> Cloud SQL / Org Tree
+            </div>
+            <div class="node gcp" id="gcs">
+                <img src="../../apps/video/public/assets/google/gemma-ecosystem__google-cloud.svg" alt="GCS"> GCS Raw Archives
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const svg = document.getElementById('svg-canvas');
+
+        // Color Palette matching CSS variables
+        const colors = {
+            gcp: '#4285F4',
+            agent: '#10b981',
+            core: '#8b5cf6',
+            source: '#f59e0b',
+            llm: '#EA4335',
+            gate: '#ef4444',
+            local: '#d97706'
+        };
+
+        // Connections mapping: [fromId, toId, colorKey, isDashed/Return]
+        const connections = [
+            // Sources to API
+            ['gh', 'api', 'source'],
+            ['conf', 'api', 'source'],
+            ['notion', 'api', 'source'],
+            ['slack', 'api', 'source'],
+            ['jira', 'api', 'source'],
+
+            // Platform Core
+            ['api', 'celery', 'core'],
+            
+            // Celery to Agents
+            ['celery', 'ingestor', 'core'],
+            ['celery', 'gatekeeper', 'core'],
+            ['celery', 'compiler', 'core'],
+            ['celery', 'rollup', 'core'],
+
+            // Agents to Router
+            ['ingestor', 'router', 'agent'],
+            ['gatekeeper', 'router', 'agent'],
+            ['compiler', 'router', 'agent'],
+            ['rollup', 'router', 'agent'],
+
+            // Router to LLMs
+            ['router', 'gemini', 'llm'],
+            ['router', 'gemma', 'local'],
+
+            // Safety Gates & Cross Flow
+            ['ingestor', 'atomic', 'gate'],
+            ['compiler', 'linter', 'gate'],
+            
+            // Outputs / Returns
+            ['linter', 'gh', 'source', true], // Returns to GitHub
+            ['ingestor', 'gcs', 'gcp'],
+
+            // Cloud Connections
+            ['run', 'api', 'gcp'],
+            ['api', 'sql', 'gcp']
+        ];
+
+        function drawLine(fromId, toId, color, isReturn = false) {
+            const el1 = document.getElementById(fromId);
+            const el2 = document.getElementById(toId);
+            
+            if (!el1 || !el2) return;
+
+            const rect1 = el1.getBoundingClientRect();
+            const rect2 = el2.getBoundingClientRect();
+
+            // Calculate center points
+            let x1 = rect1.left + rect1.width / 2;
+            let y1 = rect1.top + rect1.height / 2;
+            let x2 = rect2.left + rect2.width / 2;
+            let y2 = rect2.top + rect2.height / 2;
+
+            // Adjust anchors slightly for better bezier curves based on relative position
+            if (x2 > x1 + rect1.width) {
+                // Moving right
+                x1 += rect1.width / 2;
+                x2 -= rect2.width / 2;
+            } else if (x1 > x2 + rect2.width) {
+                // Moving left
+                x1 -= rect1.width / 2;
+                x2 += rect2.width / 2;
+            }
+
+            if (y2 > y1 + rect1.height) {
+                y1 += rect1.height / 2;
+                y2 -= rect2.height / 2;
+            } else if (y1 > y2 + rect2.height) {
+                y1 -= rect1.height / 2;
+                y2 += rect2.height / 2;
+            }
+
+            // Create bezier curve path
+            const dx = Math.abs(x2 - x1);
+            const dy = Math.abs(y2 - y1);
+            const tension = 0.4;
+            
+            // Determine control points based on layout direction
+            let cx1, cy1, cx2, cy2;
+            
+            if (isReturn) {
+                // Large sweeping curve for feedback loops
+                cx1 = x1;
+                cy1 = y1 + 200;
+                cx2 = x2;
+                cy2 = y2 + 200;
+            } else if (dx > dy) {
+                cx1 = x1 + dx * tension;
+                cy1 = y1;
+                cx2 = x2 - dx * tension;
+                cy2 = y2;
+            } else {
+                cx1 = x1;
+                cy1 = y1 + dy * tension;
+                cx2 = x2;
+                cy2 = y2 - dy * tension;
+            }
+
+            const d = `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`;
+
+            // Background solid line (dim)
+            const bgPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            bgPath.setAttribute('d', d);
+            bgPath.setAttribute('class', 'link-bg');
+            
+            // Foreground animated line
+            const animPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            animPath.setAttribute('d', d);
+            animPath.setAttribute('class', 'link-anim');
+            animPath.setAttribute('stroke', color);
+
+            svg.appendChild(bgPath);
+            svg.appendChild(animPath);
+        }
+
+        function renderNetwork() {
+            // Clear existing SVG
+            svg.innerHTML = '';
+            
+            // Draw all connections
+            connections.forEach(conn => {
+                drawLine(conn[0], conn[1], colors[conn[2]], conn[3]);
+            });
+        }
+
+        // Run on load and resize
+        window.addEventListener('load', () => {
+            // Slight delay to ensure fonts/images render
+            setTimeout(renderNetwork, 100);
+        });
+        window.addEventListener('resize', renderNetwork);
+        
+        // Also re-render occasionally during the float animation to keep lines attached
+        setInterval(renderNetwork, 50);
+
+    </script>
+</body>
+</html>

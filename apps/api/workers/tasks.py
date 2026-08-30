@@ -176,3 +176,18 @@ if settings.SOURCE_MONITOR_MODE == 'polling':
         },
     }
 
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def add_source_pipeline_task(self, kb_id: str, source: dict):
+    from .db_session import get_db_sync
+    from ..services.sse import SSEManager
+    from ..agents.runner import run_add_source_pipeline
+    try:
+        async def _execute():
+            async with get_db_sync() as db:
+                sse = SSEManager()
+                await run_add_source_pipeline(kb_id, source, db, sse)
+        _run_async(_execute())
+    except Exception as exc:
+        logger.exception(f"add_source_pipeline_task failed for {kb_id}: {exc}")
+        raise self.retry(exc=exc)

@@ -74,7 +74,7 @@ async def run_generation_pipeline(kb_id: str, db: AsyncSession, sse: SSEManager)
         active_ai_mode = get_env_var("AI_MODE", getattr(settings, "AI_MODE", "remote"))
         await _log_event(db, str(kb.id), sse, "pipeline_started", {
             "status": "ingesting",
-            "ai_mode": active_ai_mode,
+            "message": "Pipeline initiated: Ingestion and architecture analysis started",
         })
 
         context = AgentContext(
@@ -108,38 +108,31 @@ async def run_generation_pipeline(kb_id: str, db: AsyncSession, sse: SSEManager)
         context.candidate_contracts = candidate_contracts
 
         await _log_event(db, str(kb.id), sse, "ingestion_complete", {
-            "chars": len(ingested_summary),
-            "raw_chars": len(raw_content),
             "discovered_signatures": len(discovered_identifiers),
             "matched_cross_kbs": len(candidate_contracts),
+            "message": f"Ingestion complete: Discovered {len(discovered_identifiers)} interface contracts ({len(candidate_contracts)} cross-app links matched)",
         })
 
         # ── Step 2: Compilation ────────────────────────────────────────────
         await _update_kb_status(db, kb, KBStatus.generating, sse)
         await _log_event(db, str(kb.id), sse, "compilation_started", {
-            "ai_mode": active_ai_mode,
             "matched_cross_kbs": len(candidate_contracts),
+            "message": f"Synthesis phase: Generating OpenKB documentation pages ({len(candidate_contracts)} cross-app connections identified)",
         })
 
-        # Wrap run_compiler with per-page SSE events
-        async def compile_with_events(ctx):
-            """Run compiler and emit a page_compiled SSE event after each page."""
-            from .compiler import run_compiler as _run_compiler
-            files = await _run_compiler(ctx)
-            page_paths = [p for p in files if p != "index.md"]
-            for i, path in enumerate(page_paths, 1):
-                await _log_event(db, str(kb.id), sse, "page_compiled", {
-                    "path": path,
-                    "index": i,
-                    "total": len(page_paths),
-                })
-            return files
+        async def compile_log_cb(event_type: str, payload: dict):
+            try:
+                from ..workers.db_session import get_db_sync
+                async with get_db_sync() as event_db:
+                    await _log_event(event_db, str(kb.id), sse, event_type, payload)
+            except Exception as err:
+                logger.warning(f"Failed to log event {event_type}: {err}")
 
-        compiled_files = await compile_with_events(context)
+        compiled_files = await run_compiler(context, log_callback=compile_log_cb)
         context.compiled_files = compiled_files
         await _log_event(db, str(kb.id), sse, "compilation_complete", {
             "file_count": len(compiled_files),
-            "files": list(compiled_files.keys()),
+            "message": f"Compilation complete: {len(compiled_files)} OpenKB documentation pages synthesized",
         })
 
         # ── Step 2.5: Register exported interface contracts into Org Catalog ─
@@ -148,17 +141,20 @@ async def run_generation_pipeline(kb_id: str, db: AsyncSession, sse: SSEManager)
         )
         await _log_event(db, str(kb.id), sse, "contracts_registered", {
             "registered_contracts": registered_count,
-            "app_name": kb.app_name,
+            "message": f"Registered {registered_count} interface contracts into Organization Catalog",
         })
 
 
         # ── Step 3: GitOps — provision repo ───────────────────────────────
-        github_org = org.github_org or getattr(settings, "GITHUB_DEFAULT_ORG", "Astrophase")
+        github_org = org.github_org or getattr(settings, "GITHUB_DEFAULT_ORG", "astrophage-org")
         repo_url = provision_kb_repo(org.slug, kb.app_name, github_org)
         repo_full_name = "/".join(repo_url.rstrip("/").split("/")[-2:])
         kb.git_repo_url = repo_url
         await db.commit()
-        await _log_event(db, str(kb.id), sse, "repo_provisioned", {"repo_url": repo_url})
+        await _log_event(db, str(kb.id), sse, "repo_provisioned", {
+            "repo_url": repo_url,
+            "message": "Knowledge Base repository provisioned on GitHub",
+        })
 
         # ── Step 4: Commit to feature branch ──────────────────────────────
         feature_branch = "kb/initial-generation"
@@ -188,7 +184,10 @@ async def run_generation_pipeline(kb_id: str, db: AsyncSession, sse: SSEManager)
             logger.warning(f"Could not register PR webhook for KB repo {repo_full_name}: {e}")
             
         await db.commit()
-        await _log_event(db, str(kb.id), sse, "pr_opened", {"pr_url": pr_url})
+        await _log_event(db, str(kb.id), sse, "pr_opened", {
+            "pr_url": pr_url,
+            "message": "Pull Request opened for review and publishing",
+        })
 
         # ── Step 6: Register monitors for all configured sources (Flow B) ─
         for source in (kb.source_urls or []):
@@ -421,7 +420,7 @@ async def run_rollup_pipeline(org_id: str, db: AsyncSession, sse: SSEManager):
         logger.info(f"Rollup generated {len(org_files)} files for org {org_id}")
 
         # ── GitOps: provision org repo if needed ──────────────────────────
-        github_org = org.github_org or getattr(settings, "GITHUB_DEFAULT_ORG", "openkb-astrophage")
+        github_org = org.github_org or getattr(settings, "GITHUB_DEFAULT_ORG", "astrophage-org")
         if existing_org_kb_record and existing_org_kb_record.git_repo_url:
             org_repo_url = existing_org_kb_record.git_repo_url
         else:
@@ -478,3 +477,153 @@ async def run_rollup_pipeline(org_id: str, db: AsyncSession, sse: SSEManager):
 
     except Exception as e:
         logger.exception(f"Rollup pipeline failed for org {org_id}: {e}")
+
+async def run_add_source_pipeline(kb_id: str, source: dict, db: AsyncSession, sse: SSEManager):
+    """Flow D: Add a new source to a published KB incrementally."""
+    kb_uuid = uuid.UUID(kb_id) if isinstance(kb_id, str) else kb_id
+    kb = await db.get(KnowledgeBase, kb_uuid)
+    if not kb:
+        logger.error(f"KnowledgeBase {kb_id} not found for add-source pipeline")
+        return
+
+    org = await db.get(Org, kb.org_id)
+    org_slug = org.slug if org else "default"
+    
+    source_type = source.get("type", "github")
+    source_url = source.get("url", "")
+    config = source.get("config", {})
+    
+    tokens = {
+        'GITHUB_APP_TOKEN': settings.GITHUB_APP_TOKEN,
+        'CONFLUENCE_API_TOKEN': settings.CONFLUENCE_API_TOKEN,
+        'NOTION_API_TOKEN': settings.NOTION_API_TOKEN,
+        'JIRA_API_TOKEN': settings.JIRA_API_TOKEN
+    }
+
+    try:
+        logger.info(f"🌟 [Add Source] Starting incremental pipeline for {kb.app_name} ({source_url})")
+        await _log_event(db, str(kb.id), sse, "pipeline_started", {
+            "message": f"Ingesting new source: {source_url}",
+            "source_type": source_type,
+            "source_url": source_url,
+        })
+        
+        # 1. Ingest new source
+        from .ingestor import run_ingestor
+        from .coverage_diff import run_coverage_diff
+        from ..services.local_storage import load_checkpoint_json
+        
+        context = AgentContext(
+            kb_id=str(kb.id),
+            org_slug=org_slug,
+            app_name=kb.app_name,
+            org_id=str(kb.org_id),
+        )
+        
+        async def ingest_log_cb(event_type: str, payload: dict):
+            try:
+                from ..workers.db_session import get_db_sync
+                async with get_db_sync() as event_db:
+                    await _log_event(event_db, str(kb.id), sse, event_type, payload)
+            except Exception as err:
+                pass
+                
+        # We simulate the source as a list of 1 to reuse run_ingestor
+        ingested_summary, raw_content = await run_ingestor(context, [source], tokens, log_callback=ingest_log_cb)
+        context.ingested_content = ingested_summary
+        
+        # 2. Load existing KB files
+        cached_compiled = load_checkpoint_json(str(kb.id), "compiled_files.json") or {}
+        
+        if not cached_compiled:
+            logger.warning(f"No existing KB files found for {kb.app_name}, this might not be published yet.")
+            
+        # 3. Coverage diff
+        await _log_event(db, str(kb.id), sse, "diff_checked", {
+            "message": f"Analyzing coverage of new source against existing KB...",
+            "source_type": source_type
+        })
+        
+        diff_result = await run_coverage_diff(
+            app_name=kb.app_name,
+            existing_kb_files=cached_compiled,
+            new_source_content=raw_content,
+            source_type=source_type,
+            source_url=source_url,
+            org_slug=org_slug
+        )
+        
+        logger.info(f"🌟 [Add Source] Coverage diff: is_fully_covered={diff_result['is_fully_covered']}, reason={diff_result['reason']}")
+        
+        if diff_result["is_fully_covered"]:
+            # Exit early, no PR needed
+            await _log_event(db, str(kb.id), sse, "gatekeeper_trivial", {
+                "message": f"Source is fully covered by existing KB. No PR needed. Reason: {diff_result['reason']}",
+                "source_type": source_type,
+            })
+            return
+            
+        # 4. Patch compilation
+        affected_files = diff_result["pages_to_create"] + diff_result["pages_to_update"]
+        context.affected_files = affected_files
+        context.decision = "significant"
+        # We need to simulate the diff text for the patch compiler
+        context.ingested_content = f"New Source Add ({source_type.upper()}): {source_url}\n\nContent:\n{raw_content[:40000]}"
+        
+        await _update_kb_status(db, kb, KBStatus.generating, sse, {"trigger": "add_source"})
+        await _log_event(db, str(kb.id), sse, "patch_compilation_started", {
+            "message": f"Compiling updates for new source. Affected files: {len(affected_files)}",
+            "affected_files": affected_files,
+            "source_type": source_type,
+        })
+        
+        from .compiler import run_compiler
+        patch_files = await run_compiler(context, patch_files=affected_files)
+        
+        if org:
+            await register_kb_contracts(db, str(org.id), str(kb.id), kb.app_name, patch_files)
+            
+        await _log_event(db, str(kb.id), sse, "patch_compiled", {
+            "file_count": len(patch_files),
+            "files": list(patch_files.keys()),
+            "message": f"Compiled {len(patch_files)} documentation files for new source",
+            "source_type": source_type,
+        })
+        
+        # 5. Commit & PR
+        repo_full_name = "/".join(kb.git_repo_url.rstrip("/").split("/")[-2:]) if kb.git_repo_url else f"org/kb-{kb.app_name}"
+        branch_suffix = uuid.uuid4().hex[:7]
+        branch = f"kb/add-source-{source_type}-{branch_suffix}"
+        
+        commit_kb_to_branch(repo_full_name, branch, patch_files)
+        
+        pr_title = f"🚀 New Source Added: {source_type.capitalize()} for {kb.app_name}"
+        pr_body = (
+            f"### 🌌 Astrophage Add Source Pipeline\n\n"
+            f"A new source was added to the Knowledge Base:\n\n"
+            f"- **Source:** `{source_type}` ({source_url})\n"
+            f"- **Analysis:** {diff_result['reason']}\n"
+            f"- **New Pages:** {', '.join(diff_result['pages_to_create']) or 'None'}\n"
+            f"- **Updated Pages:** {', '.join(diff_result['pages_to_update']) or 'None'}\n\n"
+            f"Please review the incremental documentation updates and merge to publish."
+        )
+        
+        pr_url = open_pull_request(repo_full_name, branch, pr_title, pr_body)
+        kb.pr_url = pr_url
+        await db.commit()
+        
+        await _log_event(db, str(kb.id), sse, "pr_opened", {
+            "pr_url": pr_url,
+            "branch": branch,
+            "source_type": source_type,
+            "message": f"Pull Request opened for new source: {pr_url}",
+        })
+        
+        await _update_kb_status(db, kb, KBStatus.in_review, sse, {"pr_url": pr_url, "trigger": "add_source"})
+        
+    except Exception as e:
+        logger.exception(f"❌ Add source pipeline failed for KB {kb_id}: {e}")
+        # Revert status if we changed it, or just emit error
+        await _update_kb_status(db, kb, KBStatus.failed, sse, {"error": str(e)})
+        await _log_event(db, str(kb.id), sse, "pipeline_error", {"error": str(e)})
+

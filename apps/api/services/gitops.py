@@ -89,7 +89,7 @@ def _slugify(text: str) -> str:
 
 def _get_target_owner(g: Github, github_org: str = None):
     """Resolve target owner: organization if valid/accessible, otherwise target account or authenticated user."""
-    target_org = github_org or getattr(settings, "GITHUB_DEFAULT_ORG", None) or "Astrophase"
+    target_org = github_org or getattr(settings, "GITHUB_DEFAULT_ORG", None) or "astrophage-org"
     if target_org:
         try:
             return g.get_organization(target_org)
@@ -108,7 +108,7 @@ def _get_target_owner(g: Github, github_org: str = None):
         return None
 
 def provision_kb_repo(org_slug: str, app_name: str, github_org: str = None) -> str:
-    target_org = github_org or getattr(settings, "GITHUB_DEFAULT_ORG", None) or "Astrophase"
+    target_org = github_org or getattr(settings, "GITHUB_DEFAULT_ORG", None) or "astrophage-org"
     g = get_github_client()
     owner = _get_target_owner(g, target_org)
     

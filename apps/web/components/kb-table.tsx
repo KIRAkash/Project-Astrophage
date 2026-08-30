@@ -43,22 +43,22 @@ export function KBTable({ kbs }: KBTableProps) {
               <tr key={kb.id} className="hover:bg-white/5 transition-colors group">
                 <td className="px-6 py-4">
                   <Link href={`/kb/${kb.id}`} className="font-semibold text-white hover:text-stellar transition-colors">
-                    {kb.appName}
+                    {kb.appName || kb.app_name || kb.id}
                   </Link>
                 </td>
                 <td className="px-6 py-4 text-gray-400">
-                  <Link href={`/orgs/${kb.orgId}`} className="hover:text-white transition-colors">
-                    {kb.orgId}
+                  <Link href={`/orgs/${kb.orgId || kb.org_id || ''}`} className="hover:text-white transition-colors">
+                    {kb.orgId || kb.org_id || ''}
                   </Link>
                 </td>
                 <td className="px-6 py-4">
                   <StatusBadge status={kb.status} size="sm" />
                 </td>
                 <td className="px-6 py-4 text-gray-500">
-                  {kb.sourceUrls.length} sources
+                  {(kb.sourceUrls || kb.source_urls || []).length} sources
                 </td>
                 <td className="px-6 py-4 text-gray-500">
-                  {new Date(kb.updatedAt).toLocaleDateString()}
+                  {kb.updatedAt || kb.updated_at ? new Date(kb.updatedAt || kb.updated_at || '').toLocaleDateString() : '—'}
                 </td>
                 <td className="px-6 py-4 text-right">
                   {kb.prUrl ? (

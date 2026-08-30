@@ -33,3 +33,7 @@ skills-lock.json
 
 scripts/
 output/
+deploy_gcp.sh
+gcp-key.json
+setup_gcp_infra.sh
+apps/celerybeat-schedule.db

@@ -4,9 +4,10 @@ import { StatusBadge } from '@/components/status-badge';
 import { KBEventFeed } from '@/components/kb-event-feed';
 import { useKBStatus } from '@/lib/sse';
 import Link from 'next/link';
-import { ExternalLink, GitMerge, Github, FileText, RefreshCw, AlertTriangle, GitCompare, Code2, Sparkles, MessageSquare, Book, Trello, Upload, CheckCircle2 } from 'lucide-react';
+import { Plus, ExternalLink, GitMerge, Github, FileText, RefreshCw, AlertTriangle, GitCompare, Code2, Sparkles, MessageSquare, Book, Trello, Upload, CheckCircle2 } from 'lucide-react';
 
 import { KBStatus, KnowledgeBase } from '@/types/kb';
+import { AddSourcePanel } from '@/components/add-source-panel';
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 
@@ -17,6 +18,7 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
   const [retrying, setRetrying] = useState(false);
   const [restartMessage, setRestartMessage] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [showAddSource, setShowAddSource] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ text: string; type: 'info' | 'success' | 'warning' | 'error' } | null>(null);
 
   const fetchKb = () => {
@@ -172,6 +174,8 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
             {isConnected ? 'Live' : 'Disconnected'}
           </div>
           
+
+          
           <button
             onClick={handleCheckUpdates}
             disabled={checkingUpdates || restarting}
@@ -179,7 +183,7 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
             title="Inspect source repository for latest commits and trigger Gatekeeper update"
           >
             <GitCompare className={`w-4 h-4 ${checkingUpdates ? 'animate-spin' : ''}`} />
-            {checkingUpdates ? 'Scanning Diff...' : 'Scan for Changes'}
+            {checkingUpdates ? 'Rescanning...' : 'Rescan'}
           </button>
 
           <button
@@ -189,7 +193,7 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
             title="Wipes all saved checkpoints on disk and restarts ingestion & compilation from scratch"
           >
             <RefreshCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />
-            {restarting ? 'Restarting from Scratch...' : 'Restart from Scratch'}
+            {restarting ? 'Restarting...' : 'Restart'}
           </button>
 
           {kb.gitRepoUrl && (
@@ -260,7 +264,7 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
               title="Clears all saved checkpoints and restarts from scratch"
             >
               <RefreshCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />
-              {restarting ? 'Restarting...' : 'Restart from Scratch'}
+              {restarting ? 'Restarting...' : 'Restart'}
             </button>
           </div>
         </div>
@@ -370,6 +374,13 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
                 <li className="text-gray-500 font-mono text-sm">No sources configured.</li>
               )}
             </ul>
+            <button
+              onClick={() => setShowAddSource(true)}
+              className="mt-4 w-full bg-white/5 hover:bg-white/10 text-gray-300 border border-dashed border-white/20 py-2.5 rounded-lg font-mono text-sm flex items-center justify-center gap-2 transition-all"
+              title="Add a new source to this Knowledge Base incrementally"
+            >
+              <Plus className="w-4 h-4" /> Add Source
+            </button>
           </NebulaCard>
 
 

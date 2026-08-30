@@ -34,16 +34,25 @@ export interface Org {
 
 export interface KnowledgeBase {
   id: string;
-  orgId: string;
-  appName: string;
+  orgId?: string;
+  org_id?: string;
+  appName?: string;
+  app_name?: string;
   status: KBStatus;
-  sourceUrls: SourceItem[];
+  sourceUrls?: SourceItem[];
+  source_urls?: any[];
   sourceMonitors?: SourceMonitor[];
+  source_monitors?: any[];
   gitRepoUrl?: string;
+  git_repo_url?: string;
   prUrl?: string;
+  pr_url?: string;
   orgPrUrl?: string;
-  createdAt: string;
-  updatedAt: string;
+  org_pr_url?: string;
+  createdAt?: string;
+  created_at?: string;
+  updatedAt?: string;
+  updated_at?: string;
 }
 
 export type KBEventType = 'status_change' | 'gatekeeper_pass' | 'gatekeeper_block' | 'pr_opened' | 'diff_ingested' | 'diff_checked' | 'pipeline_started' | 'pipeline_error';

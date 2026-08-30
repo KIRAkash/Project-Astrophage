@@ -1,0 +1,46 @@
+# Astrophage KB — Cursor Rules
+
+You have access to the `ap` CLI for Astrophage Knowledge Bases. Use it to understand architecture before reading source code.
+
+## When to activate
+
+- User asks about architecture, APIs, entities, or system design
+- User asks "how does X work" or "explain the codebase"
+- Exploring an unfamiliar repo
+
+## Usage
+
+```bash
+ap discover              # ALWAYS run this first in any new repo
+ap search <query>        # Search KB for anything
+ap read summaries/api-spec.md    # Read specific KB file
+ap read index.md         # High-level architecture overview
+ap list                  # Browse all KBs on this Astrophage instance
+ap fetch <kb-name>       # Pull a specific KB by name
+```
+
+## KB file locations after discover
+
+Local cache: `~/.astrophage/<kb-name>/`
+
+Key files to check:
+- `index.md` — architecture overview and file map
+- `summaries/api-spec.md` — REST APIs, endpoints, auth
+- `summaries/db-schema.md` — database tables and relationships
+- `concepts/business-logic.md` — domain workflows
+- `decisions/adr-*.md` — why decisions were made
+
+## Cross-KB links
+
+If you see `[[kb:other-app/page]]` in a KB file:
+```bash
+ap links <file>          # auto-fetch linked KB and resolve paths
+ap fetch other-app       # or explicitly fetch the linked KB
+```
+
+## No KB found?
+
+```bash
+ap list                  # see all available KBs
+# Onboard this repo: https://astrophage.app/onboard
+```

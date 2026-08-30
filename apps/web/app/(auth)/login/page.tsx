@@ -1,12 +1,29 @@
 'use client';
 import { NebulaCard } from '@/components/space/nebula-card';
 import { OrbitLoader } from '@/components/space/orbit-loader';
-import { Github } from 'lucide-react';
-import { signIn } from 'next-auth/react';
 import { useState } from 'react';
+import { auth, googleProvider } from '@/lib/firebase';
+import { signInWithPopup } from 'firebase/auth';
+import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
+
+  const handleLogin = async () => {
+    if (!auth) {
+      console.error("Firebase Auth is not configured. Please verify your environment variables.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await signInWithPopup(auth, googleProvider);
+      router.push('/dashboard');
+    } catch (error) {
+      console.error("Firebase Login Error:", error);
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
@@ -26,14 +43,10 @@ export default function LoginPage() {
           </div>
         ) : (
           <button
-            onClick={() => {
-              setLoading(true);
-              signIn('github', { callbackUrl: '/dashboard' });
-            }}
-            className="w-full bg-white/10 hover:bg-white/20 border border-white/20 hover:border-stellar transition-all duration-300 rounded-lg py-3 px-4 flex items-center justify-center gap-3 font-mono"
+            onClick={handleLogin}
+            className="w-full bg-white/10 hover:bg-white/20 border border-white/20 hover:border-stellar transition-all duration-300 rounded-lg py-3 px-4 flex items-center justify-center flex-col font-mono"
           >
-            <Github className="w-5 h-5" />
-            Launch with GitHub
+            Launch with Google
           </button>
         )}
       </NebulaCard>

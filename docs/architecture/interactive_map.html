@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Astrophage Architecture</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #000000;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: auto;
+            position: relative;
+            min-width: 1400px;
+            min-height: 800px;
+        }
+
+        /* Connecting Lines using SVG */
+        .lines-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .line {
+            stroke: rgba(100, 200, 255, 0.4);
+            stroke-width: 2;
+            fill: none;
+            stroke-dasharray: 5, 5;
+            animation: dash 20s linear infinite;
+        }
+
+        @keyframes dash {
+            to {
+                stroke-dashoffset: -1000;
+            }
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 250px 400px 250px 400px;
+            gap: 40px;
+            position: relative;
+            z-index: 1;
+            padding-top: 20px;
+        }
+
+        .group {
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            background: rgba(10, 10, 15, 0.5);
+            position: relative;
+        }
+
+        .group-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #8892b0;
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 5px;
+            text-align: center;
+        }
+
+        .box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: transparent;
+            background-image: url('file:///Users/akash/.gemini/antigravity/brain/3ed3d646-caff-443b-9766-abdd036bf7d1/empty_space_panel_1787838810235.jpg');
+            background-size: cover;
+            background-position: center;
+            width: 130px;
+            height: 130px;
+            margin-bottom: 20px;
+            margin-left: auto;
+            margin-right: auto;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+            transition: transform 0.3s ease;
+            cursor: pointer;
+            border-radius: 15px;
+        }
+
+        .box:hover {
+            transform: scale(1.05);
+        }
+
+        .box img {
+            width: 32px;
+            height: 32px;
+            margin-bottom: 8px;
+        }
+
+        /* Specific Glows */
+        .glow-orange { box-shadow: 0 0 20px rgba(245, 158, 11, 0.5); }
+        .glow-purple { box-shadow: 0 0 20px rgba(139, 92, 246, 0.5); }
+        .glow-red { box-shadow: 0 0 20px rgba(239, 68, 68, 0.5); }
+        .glow-green { box-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
+        .glow-blue { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+        .glow-yellow { box-shadow: 0 0 20px rgba(234, 179, 8, 0.5); }
+
+        /* Custom placements */
+        .col-1 { grid-column: 1; }
+        .col-2 { grid-column: 2; display: flex; flex-direction: column; align-items: center;}
+        .col-3 { grid-column: 3; }
+        .col-4 { grid-column: 4; display: flex; flex-direction: column; gap: 40px;}
+
+        .router-circle {
+            width: 130px;
+            height: 130px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            background: #000;
+            border: 3px solid rgba(59, 130, 246, 0.8);
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.6), inset 0 0 20px rgba(59, 130, 246, 0.4);
+            font-size: 13px;
+            font-weight: bold;
+            margin: 20px auto;
+        }
+
+        .flex-row {
+            display: flex;
+            align-items: center;
+            gap: 40px;
+            width: 100%;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+    
+    <!-- SVG Lines layer for connections -->
+    <svg class="lines-container">
+        <!-- Lines from Sources to FastAPI -->
+        <path class="line" d="M 230,120 Q 300,120 380,300" />
+        <path class="line" d="M 230,270 Q 300,270 380,300" />
+        <path class="line" d="M 230,420 Q 300,420 380,300" />
+        <path class="line" d="M 230,570 Q 300,570 380,300" />
+        <path class="line" d="M 230,720 Q 300,720 380,300" />
+
+        <!-- FastAPI to Celery -->
+        <path class="line" d="M 440,300 L 510,300" />
+
+        <!-- Celery to Agents -->
+        <path class="line" d="M 640,300 Q 700,300 780,120" />
+        <path class="line" d="M 640,300 Q 700,300 780,300" />
+        <path class="line" d="M 640,300 Q 700,300 780,480" />
+        <path class="line" d="M 640,300 Q 700,300 780,660" />
+
+        <!-- Agents to Router -->
+        <path class="line" d="M 910,120 Q 950,120 1020,180" />
+        <path class="line" d="M 910,300 Q 950,300 1020,180" />
+        <path class="line" d="M 910,480 Q 950,480 1020,180" />
+        <path class="line" d="M 910,660 Q 950,660 1020,180" />
+        
+        <!-- Router to LLMs -->
+        <path class="line" d="M 1150,180 L 1220,120" />
+        <path class="line" d="M 1150,180 L 1220,270" />
+    </svg>
+
+    <div class="container">
+        
+        <!-- Column 1: Data Sources -->
+        <div class="group col-1">
+            <div class="group-title">🔌 Data Sources</div>
+            <div class="box glow-orange">
+                <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/jira/jira-original.svg" alt="Jira"> 
+                <span>Jira</span>
+            </div>
+            <div class="box glow-orange">
+                <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/slack/slack-original.svg" alt="Slack"> 
+                <span>Slack</span>
+            </div>
+            <div class="box glow-orange">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Notion_app_logo.png" alt="Notion"> 
+                <span>Notion</span>
+            </div>
+            <div class="box glow-orange">
+                <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/confluence/confluence-original.svg" alt="Confluence"> 
+                <span>Confluence</span>
+            </div>
+            <div class="box glow-orange">
+                <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg" style="filter: invert(1)" alt="GitHub"> 
+                <span>GitHub</span>
+            </div>
+        </div>
+
+        <!-- Column 2: Platform Engine -->
+        <div class="group col-2">
+            <div class="group-title">⚙️ Engine & Gates</div>
+            
+            <div style="margin-top: 150px;"></div>
+            
+            <div class="flex-row">
+                <div class="box glow-purple">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/fastapi/fastapi-original.svg" alt="FastAPI"> 
+                    <span>FastAPI</span>
+                </div>
+                <div class="box glow-purple">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/redis/redis-original.svg" alt="Celery/Redis"> 
+                    <span>Celery / Redis</span>
+                </div>
+            </div>
+
+            <div style="height: 60px;"></div>
+
+            <div class="box glow-red">
+                <span>Atomic Registry</span>
+            </div>
+            <div class="box glow-red">
+                <span>Pre-PR Linter</span>
+            </div>
+        </div>
+
+        <!-- Column 3: AI Agents -->
+        <div class="group col-3">
+            <div class="group-title">🤖 AI Agent Fleet</div>
+            <div class="box glow-green">
+                <span>Gatekeeper<br>Agent</span>
+            </div>
+            <div style="height: 30px;"></div>
+            <div class="box glow-green">
+                <span>Compiler<br>Agent</span>
+            </div>
+            <div style="height: 30px;"></div>
+            <div class="box glow-green">
+                <span>Rollup<br>Agent</span>
+            </div>
+            <div style="height: 30px;"></div>
+            <div class="box glow-green">
+                <span>Ingestor<br>Agent</span>
+            </div>
+        </div>
+
+        <!-- Column 4: Routing & Cloud -->
+        <div class="col-4">
+            
+            <div class="group">
+                <div class="group-title">🧠 LLM Layer</div>
+                <div class="flex-row" style="gap: 20px;">
+                    <div class="router-circle">
+                        <span>AI Mode<br>Router</span>
+                    </div>
+                    
+                    <div>
+                        <div class="box glow-yellow">
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" alt="Gemma"> 
+                            <span>Gemma Local</span>
+                        </div>
+                        <div class="box glow-yellow">
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" alt="Gemini"> 
+                            <span>Gemini Cloud</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="group">
+                <div class="group-title">☁️ Google Cloud Services</div>
+                <div class="flex-row">
+                    <div class="box glow-blue">
+                        <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/googlecloud/googlecloud-original.svg" alt="GCS"> 
+                        <span>Cloud Storage</span>
+                    </div>
+                    <div class="box glow-blue">
+                        <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/googlecloud/googlecloud-original.svg" alt="Cloud Run"> 
+                        <span>Cloud Run</span>
+                    </div>
+                </div>
+                <div class="box glow-blue">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/postgresql/postgresql-original.svg" alt="Cloud SQL"> 
+                    <span>Cloud SQL</span>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+</body>
+</html>

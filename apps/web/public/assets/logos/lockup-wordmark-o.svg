@@ -1,0 +1,88 @@
+<svg viewBox="0 0 450 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700;800&amp;display=swap');
+      .wordmark-text-white {
+        font-family: 'Space Grotesk', -apple-system, sans-serif;
+        font-weight: 800;
+        font-size: 44px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        fill: #FFFFFF;
+      }
+    </style>
+
+    <!-- Sphere Radial Gradient (Verbatim from logo.svg) -->
+    <radialGradient id="sphere-grad-wide" cx="42%" cy="40%" r="58%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="30%" stop-color="#3b82f6"/>
+      <stop offset="65%" stop-color="#6366f1"/>
+      <stop offset="85%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#4c1d95"/>
+    </radialGradient>
+
+    <!-- Wider Planetary Ring Linear Gradient (Verbatim from logo.svg) -->
+    <linearGradient id="ring-grad-wide" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="40%" stop-color="#38bdf8"/>
+      <stop offset="80%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+
+    <!-- Outer Containment Arc Gradients (Verbatim from logo.svg) -->
+    <linearGradient id="arc-top-right-w" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="50%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="arc-bottom-right-w" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+    <linearGradient id="arc-bottom-left-w" x1="100%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ec4899"/>
+      <stop offset="50%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="arc-top-left-w" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="50%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+
+    <!-- Node Gradients (Verbatim from logo.svg) -->
+    <radialGradient id="node-emerald-w" cx="35%" cy="35%" r="65%"><stop offset="0%" stop-color="#6ee7b7"/><stop offset="100%" stop-color="#059669"/></radialGradient>
+    <radialGradient id="node-cyan-w" cx="35%" cy="35%" r="65%"><stop offset="0%" stop-color="#67e8f9"/><stop offset="100%" stop-color="#0284c7"/></radialGradient>
+    <radialGradient id="node-amber-w" cx="35%" cy="35%" r="65%"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#d97706"/></radialGradient>
+    <radialGradient id="node-purple-w" cx="35%" cy="35%" r="65%"><stop offset="0%" stop-color="#e9d5ff"/><stop offset="100%" stop-color="#7c3aed"/></radialGradient>
+
+    <!-- Deep Glow Filter (Verbatim from logo.svg) -->
+    <filter id="wide-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3.2" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- 1. LEFT WORD STEM: "ASTR" in Pure White -->
+  <text x="25" y="65" class="wordmark-text-white">ASTR</text>
+
+  <!-- 2. EXACT LOGO EMBLEM AS 'O' (Verbatim from logo.svg) -->
+  <g transform="translate(154, 9) scale(0.82)">
+    <path d="M 50 12 A 38 38 0 0 1 88 50" stroke="url(#arc-top-right-w)" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M 88 50 A 38 38 0 0 1 50 88" stroke="url(#arc-bottom-right-w)" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="2.5 4" opacity="0.75"/>
+    <path d="M 50 88 A 38 38 0 0 1 12 50" stroke="url(#arc-bottom-left-w)" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M 12 50 A 38 38 0 0 1 50 12" stroke="url(#arc-top-left-w)" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="2.5 4" opacity="0.75"/>
+    <circle cx="50" cy="12" r="3.8" fill="url(#node-emerald-w)"/>
+    <circle cx="88" cy="50" r="3.8" fill="url(#node-cyan-w)"/>
+    <circle cx="50" cy="88" r="3.8" fill="url(#node-amber-w)"/>
+    <circle cx="12" cy="50" r="3.8" fill="url(#node-purple-w)"/>
+    <path d="M 23 50 A 27 7.5 0 0 1 77 50" stroke="url(#ring-grad-wide)" stroke-width="3.2" stroke-linecap="round" transform="rotate(-20 50 50)"/>
+    <circle cx="50" cy="50" r="21" fill="none" stroke="#06b6d4" stroke-width="3.2" opacity="0.9" filter="url(#wide-glow)"/>
+    <circle cx="50" cy="50" r="21" fill="url(#sphere-grad-wide)"/>
+    <path d="M 77 50 A 27 7.5 0 0 1 23 50" stroke="url(#ring-grad-wide)" stroke-width="3.2" stroke-linecap="round" transform="rotate(-20 50 50)"/>
+  </g>
+
+  <!-- 3. RIGHT WORD STEM: "PHAGE" in Pure White -->
+  <text x="236" y="65" class="wordmark-text-white">PHAGE</text>
+</svg>

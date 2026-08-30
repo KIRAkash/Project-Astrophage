@@ -1,0 +1,102 @@
+<svg viewBox="0 0 395 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700;800&amp;family=JetBrains+Mono:wght@500&amp;display=swap');
+      .brand-title {
+        font-family: 'Space Grotesk', -apple-system, sans-serif;
+        font-weight: 800;
+        letter-spacing: 0.10em;
+        text-transform: uppercase;
+      }
+      .brand-subtitle {
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 500;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+      }
+    </style>
+
+    <!-- Sphere Radial Gradient -->
+    <radialGradient id="h-sphere-grad" cx="42%" cy="40%" r="58%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="30%" stop-color="#3b82f6"/>
+      <stop offset="65%" stop-color="#6366f1"/>
+      <stop offset="85%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#4c1d95"/>
+    </radialGradient>
+
+    <!-- Wider Planetary Ring Linear Gradient -->
+    <linearGradient id="h-ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="40%" stop-color="#38bdf8"/>
+      <stop offset="80%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+
+    <!-- Outer Containment Arc Gradients -->
+    <linearGradient id="h-arc-top-right" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="50%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="h-arc-bottom-right" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+    <linearGradient id="h-arc-bottom-left" x1="100%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ec4899"/>
+      <stop offset="50%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="h-arc-top-left" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="50%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+
+    <!-- Node Gradients -->
+    <radialGradient id="h-node-emerald" cx="35%" cy="35%" r="65%"><stop offset="0%" stop-color="#6ee7b7"/><stop offset="100%" stop-color="#059669"/></radialGradient>
+    <radialGradient id="h-node-cyan" cx="35%" cy="35%" r="65%"><stop offset="0%" stop-color="#67e8f9"/><stop offset="100%" stop-color="#0284c7"/></radialGradient>
+    <radialGradient id="h-node-amber" cx="35%" cy="35%" r="65%"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#d97706"/></radialGradient>
+    <radialGradient id="h-node-purple" cx="35%" cy="35%" r="65%"><stop offset="0%" stop-color="#e9d5ff"/><stop offset="100%" stop-color="#7c3aed"/></radialGradient>
+
+    <!-- Deep Glow Filter -->
+    <filter id="h-wide-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3.2" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- LEFT LOGO EMBLEM (Centered at x=48, y=50, Scale: 0.84) -->
+  <g transform="translate(6, 8) scale(0.84)">
+    <!-- Complete Outer Orbit (Solid + Dotted) -->
+    <path d="M 50 12 A 38 38 0 0 1 88 50" stroke="url(#h-arc-top-right)" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M 88 50 A 38 38 0 0 1 50 88" stroke="url(#h-arc-bottom-right)" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="2.5 4" opacity="0.75"/>
+    <path d="M 50 88 A 38 38 0 0 1 12 50" stroke="url(#h-arc-bottom-left)" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M 12 50 A 38 38 0 0 1 50 12" stroke="url(#h-arc-top-left)" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="2.5 4" opacity="0.75"/>
+
+    <!-- 4 Cardinal Luminous Satellite Nodes -->
+    <circle cx="50" cy="12" r="3.8" fill="url(#h-node-emerald)"/>
+    <circle cx="88" cy="50" r="3.8" fill="url(#h-node-cyan)"/>
+    <circle cx="50" cy="88" r="3.8" fill="url(#h-node-amber)"/>
+    <circle cx="12" cy="50" r="3.8" fill="url(#h-node-purple)"/>
+
+    <!-- 1. Planetary Ring REAR Arc -->
+    <path d="M 23 50 A 27 7.5 0 0 1 77 50" stroke="url(#h-ring-grad)" stroke-width="3.2" stroke-linecap="round" transform="rotate(-20 50 50)"/>
+
+    <!-- 2. Solid Sphere with WIDE Flush Glow Aura -->
+    <circle cx="50" cy="50" r="21" fill="none" stroke="#06b6d4" stroke-width="3.2" opacity="0.9" filter="url(#h-wide-glow)"/>
+    <circle cx="50" cy="50" r="21" fill="url(#h-sphere-grad)"/>
+
+    <!-- 3. Planetary Ring FRONT Arc -->
+    <path d="M 77 50 A 27 7.5 0 0 1 23 50" stroke="url(#h-ring-grad)" stroke-width="3.2" stroke-linecap="round" transform="rotate(-20 50 50)"/>
+  </g>
+
+  <!-- RIGHT TYPOGRAPHY (Snug Gap) -->
+  <!-- Primary Brand Name "ASTROPHAGE" -->
+  <text x="94" y="55" fill="#FFFFFF" font-size="33" class="brand-title">ASTROPHAGE</text>
+  
+  <!-- Subtitle "ENTERPRISE INTELLIGENCE" -->
+  <text x="96" y="74" fill="#06B6D4" font-size="9" class="brand-subtitle" opacity="0.9">ENTERPRISE INTELLIGENCE</text>
+</svg>

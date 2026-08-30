@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+# ap — Astrophage Knowledge Base CLI
+#
+# Usage: ap <command> [args]
+#
+# Commands:
+#   discover          Auto-detect & clone KB for the current git repo
+#   search  <query>   Search the KB (uses qmd/rg/grep, ranked output)
+#   read    <file>    Print a KB file; resolves cross-KB [[kb:...]] links
+#   fetch   <name>    Manually fetch/clone a KB by name
+#   list              List all Astrophage KBs on this instance
+#   links   <file>    Show & fetch cross-KB links in a KB file
+#   status            Show cached KBs and sync state
+#   update            Pull latest for all cached KBs
+#   help              Show this message
+#
+# Environment:
+#   ASTROPHAGE_API    API base URL  (default: http://localhost:8000)
+#   AP_CACHE_DIR      Local cache   (default: ~/.astrophage)
+#   AP_SEARCH_TOOL    qmd|rg|grep   (default: auto)
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+# Resolve the real location of this script (follow symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+AP_BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+AP_LIB_DIR="$(cd "$AP_BIN_DIR/../lib" && pwd)"
+
+source "$AP_LIB_DIR/config.sh"
+
+# ── Sub-command router ────────────────────────────────────────────────────────
+CMD="${1:-help}"
+shift || true
+
+case "$CMD" in
+
+  # ── discover ───────────────────────────────────────────────────────────────
+  discover)
+    source "$AP_LIB_DIR/discover.sh"
+    cmd_discover "${1:-}"
+    ;;
+
+  # ── search ────────────────────────────────────────────────────────────────
+  search|s)
+    if [[ -z "${*:-}" ]]; then
+      ap_err "Usage: ap search <query>"
+      exit 1
+    fi
+    source "$AP_LIB_DIR/search.sh"
+    cmd_search "$@"
+    ;;
+
+  # ── read ──────────────────────────────────────────────────────────────────
+  read|cat|show)
+    local_file="${1:-}"
+    if [[ -z "$local_file" ]]; then
+      ap_err "Usage: ap read <file>  (e.g. ap read summaries/api-spec.md)"
+      exit 1
+    fi
+
+    source "$AP_LIB_DIR/discover.sh"
+    source "$AP_LIB_DIR/fetch_linked.sh"
+
+    # Try to resolve a KB dir
+    kb_dir=$(cmd_discover 2>/dev/null || true)
+    if [[ -z "$kb_dir" ]]; then
+      # Fallback: check if a single KB is cached
+      all=( $(find "$AP_CACHE_DIR" -maxdepth 1 -mindepth 1 -type d -name "openkb-*" 2>/dev/null) )
+      if [[ "${#all[@]}" -eq 1 ]]; then
+        kb_dir="${all[0]}"
+      fi
+    fi
+
+    # Handle absolute vs relative path
+    if [[ -f "$local_file" ]]; then
+      resolved="$local_file"
+    elif [[ -n "$kb_dir" && -f "${kb_dir}/${local_file}" ]]; then
+      resolved="${kb_dir}/${local_file}"
+    elif [[ -n "$kb_dir" && -f "${kb_dir}/${local_file}.md" ]]; then
+      resolved="${kb_dir}/${local_file}.md"
+    else
+      ap_err "File not found: $local_file"
+      if [[ -n "$kb_dir" ]]; then
+        ap_info "KB is at: $kb_dir"
+        ap_info "Available files:"
+        find "$kb_dir" -name "*.md" | sed "s|${kb_dir}/||" | head -20
+      fi
+      exit 1
+    fi
+
+    # Print the file
+    cat "$resolved"
+
+    # Auto-resolve cross-KB links
+    if grep -q '\[\[kb:' "$resolved" 2>/dev/null; then
+      echo ""
+      echo -e "${C_DIM}─── Cross-KB Links Detected ─────────────────${C_RESET}"
+      cmd_resolve_links "$resolved"
+    fi
+    ;;
+
+  # ── fetch ─────────────────────────────────────────────────────────────────
+  fetch|pull|clone)
+    source "$AP_LIB_DIR/fetch_linked.sh"
+    cmd_fetch "${1:-}"
+    ;;
+
+  # ── list ──────────────────────────────────────────────────────────────────
+  list|ls)
+    source "$AP_LIB_DIR/list.sh"
+    cmd_list
+    ;;
+
+  # ── links ─────────────────────────────────────────────────────────────────
+  links)
+    source "$AP_LIB_DIR/fetch_linked.sh"
+    cmd_resolve_links "${1:-}"
+    ;;
+
+  # ── status ────────────────────────────────────────────────────────────────
+  status|info)
+    echo ""
+    echo -e "${C_BOLD}${C_CYAN}🌌 Astrophage Skill Status${C_RESET}"
+    echo ""
+    echo -e "  ${C_DIM}API endpoint:${C_RESET}  ${ASTROPHAGE_API}"
+    echo -e "  ${C_DIM}Cache dir:${C_RESET}     ${AP_CACHE_DIR}"
+    echo ""
+
+    # List cached KBs
+    local cached_count=0 cached_dirs=()
+    while IFS= read -r d; do
+      cached_dirs+=("$d"); cached_count=$((cached_count+1))
+    done < <(find "$AP_CACHE_DIR" -maxdepth 1 -mindepth 1 -type d -name "openkb-*" 2>/dev/null)
+
+    if [[ "$cached_count" -eq 0 ]]; then
+      echo -e "  ${C_YELLOW}No KBs cached yet.${C_RESET}  Run: ${C_CYAN}ap discover${C_RESET}"
+    else
+      echo -e "  ${C_DIM}Cached KBs (${cached_count}):${C_RESET}"
+      for d in "${cached_dirs[@]}"; do
+        name="$(basename "$d")"
+        last_update=$(git -C "$d" log -1 --format="%ar" 2>/dev/null || echo "unknown")
+        echo -e "    ${C_GREEN}•${C_RESET} ${name}  ${C_DIM}(last pull: ${last_update})${C_RESET}"
+      done
+    fi
+
+    # Detect search tool
+    source "$AP_LIB_DIR/search.sh" 2>/dev/null || true
+    tool=$(detect_search_tool 2>/dev/null || echo "grep")
+    echo ""
+    echo -e "  ${C_DIM}Search engine:${C_RESET} ${tool}"
+    echo ""
+    ;;
+
+  # ── update ────────────────────────────────────────────────────────────────
+  update|sync)
+    source "$AP_LIB_DIR/clone.sh"
+    local upd_count=0 upd_dirs=()
+    while IFS= read -r d; do
+      upd_dirs+=("$d"); upd_count=$((upd_count+1))
+    done < <(find "$AP_CACHE_DIR" -maxdepth 1 -mindepth 1 -type d -name "openkb-*" 2>/dev/null)
+    if [[ "$upd_count" -eq 0 ]]; then
+      ap_info "No cached KBs to update."
+      exit 0
+    fi
+    for d in "${upd_dirs[@]}"; do
+      ap_log "Updating: $(basename "$d")..."
+      cmd_pull_kb "$d" && ap_ok "$(basename "$d")" || ap_warn "Could not update $(basename "$d")"
+    done
+    ;;
+
+  # ── version ───────────────────────────────────────────────────────────────
+  version|-v|--version)
+    echo "ap (Astrophage Skill) v0.1.0"
+    ;;
+
+  # ── help ──────────────────────────────────────────────────────────────────
+  help|-h|--help)
+    echo ""
+    echo -e "${C_BOLD}${C_CYAN}ap${C_RESET} — Astrophage Knowledge Base CLI"
+    echo ""
+    echo -e "  ${C_BOLD}ap discover${C_RESET}            Auto-detect & clone KB for current git repo"
+    echo -e "  ${C_BOLD}ap search${C_RESET}  <query>     Search the KB (ranked markdown search)"
+    echo -e "  ${C_BOLD}ap read${C_RESET}    <file>      Print a KB file (e.g. summaries/api-spec.md)"
+    echo -e "  ${C_BOLD}ap fetch${C_RESET}   <name>      Clone a specific KB by name"
+    echo -e "  ${C_BOLD}ap list${C_RESET}                List all Astrophage KBs on this instance"
+    echo -e "  ${C_BOLD}ap links${C_RESET}   <file>      Resolve cross-KB links found in a KB file"
+    echo -e "  ${C_BOLD}ap status${C_RESET}              Show cached KBs and config"
+    echo -e "  ${C_BOLD}ap update${C_RESET}              Pull latest for all cached KBs"
+    echo ""
+    echo -e "${C_DIM}Environment:"
+    echo -e "  ASTROPHAGE_API   ${ASTROPHAGE_API}"
+    echo -e "  AP_CACHE_DIR     ${AP_CACHE_DIR}"
+    echo -e "  AP_SEARCH_TOOL   $(detect_search_tool 2>/dev/null || echo "auto")${C_RESET}"
+    echo ""
+    ;;
+
+  # ── Unknown ───────────────────────────────────────────────────────────────
+  *)
+    ap_err "Unknown command: $CMD"
+    echo -e "Run ${C_CYAN}ap help${C_RESET} for usage."
+    exit 1
+    ;;
+esac

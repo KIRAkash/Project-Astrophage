@@ -102,3 +102,15 @@ class WebhookPRPayload(CamelModel):
     number: int
     pull_request: Dict[str, Any]
     repository: Dict[str, Any]
+
+class AddSourceRequest(CamelModel):
+    type: Literal['github', 'confluence', 'notion', 'jira', 'slack', 'upload']
+    url: str
+    incremental_enabled: Optional[bool] = True
+    config: Optional[Dict[str, Any]] = None
+
+class AddSourceResponse(CamelModel):
+    status: str
+    message: str
+    source_added: SourceUrlItem
+    kb: KBDetailResponse

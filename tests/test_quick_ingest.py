@@ -41,7 +41,7 @@ async def run_live_quick_ingest():
     
     start_time = time.time()
     app_name = target_app
-    org_slug = settings.GITHUB_DEFAULT_ORG or "Astrophase"
+    org_slug = settings.GITHUB_DEFAULT_ORG or "astrophage-org"
     kb_id = f"test-live-{app_name}"
 
     # 1. Read Codebase Files

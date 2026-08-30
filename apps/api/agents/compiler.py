@@ -36,9 +36,10 @@ def _route_page(path: str) -> Literal["local", "remote"]:
     In local/remote modes, routing is uniform. In hybrid mode, pages are
     routed by their directory category based on HYBRID_*_CATEGORIES config.
     """
-    if settings.AI_MODE == "local":
+    mode = get_env_var("AI_MODE", getattr(settings, "AI_MODE", "remote"))
+    if mode == "local":
         return "local"
-    if settings.AI_MODE == "remote":
+    if mode == "remote":
         return "remote"
     # hybrid
     category = path.split("/")[0]
@@ -329,6 +330,27 @@ async def run_patch_compiler(context, patch_files: list = None) -> dict:
         updated_files = json.loads(clean_json)
         if not isinstance(updated_files, dict) or len(updated_files) == 0:
             raise ValueError("Patch compiler did not return a valid dictionary of files")
+            
+        import difflib
+        genuine_updates = {}
+        for path, new_content in updated_files.items():
+            old_content = cached_compiled.get(path, "")
+            if not old_content:
+                genuine_updates[path] = new_content
+                continue
+                
+            matcher = difflib.SequenceMatcher(None, old_content, new_content)
+            ratio = matcher.quick_ratio()
+            
+            if ratio < 0.98:  # If it's less than 98% similar, it's a genuine change
+                genuine_updates[path] = new_content
+            else:
+                logger.info(f"Skipping patch for {path} as similarity is {ratio*100:.2f}% (too similar)")
+                
+        if not genuine_updates:
+            logger.info("Patch compiler produced no significant changes after similarity filtering.")
+        
+        updated_files = genuine_updates
 
     except Exception as e:
         logger.error(f"Patch compilation failed or returned invalid JSON: {e}, using minimal patch fallback")
@@ -373,7 +395,7 @@ async def run_patch_compiler(context, patch_files: list = None) -> dict:
 # Main compiler entry point
 # ---------------------------------------------------------------------------
 
-async def run_compiler(context, patch_files: list = None) -> dict:
+async def run_compiler(context, patch_files: list = None, log_callback = None) -> dict:
     """Multi-step KB compilation pipeline.
 
     Steps:
@@ -393,7 +415,7 @@ async def run_compiler(context, patch_files: list = None) -> dict:
                routed by category (local=summaries/entities, remote=concepts/decisions);
                Gemini synthesis pass.
     """
-    mode = settings.AI_MODE
+    mode = get_env_var("AI_MODE", getattr(settings, "AI_MODE", "remote"))
 
     # If in patch compilation mode, execute incremental patch compiler
     if patch_files is not None or getattr(context, 'decision', '') == 'significant':
@@ -554,6 +576,15 @@ async def run_compiler(context, patch_files: list = None) -> dict:
 
         # Checkpoint individual page immediately upon generation
         upload_content(context.kb_id, f"pages/{path}", content)
+        if log_callback:
+            try:
+                await log_callback("page_compiled", {
+                    "path": path,
+                    "topic": topic,
+                    "message": f"Compiled documentation section: {topic}"
+                })
+            except Exception as e:
+                logger.warning(f"Failed to emit page_compiled event: {e}")
         return path, content
 
     if mode == "local":

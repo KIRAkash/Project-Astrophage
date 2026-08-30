@@ -1,0 +1,11 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ingestGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+  <path d="M 20 25 L 45 50 L 20 75" fill="none" stroke="url(#ingestGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 45 25 L 70 50 L 45 75" fill="none" stroke="url(#ingestGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+  <circle cx="85" cy="50" r="6" fill="#fff"/>
+</svg>

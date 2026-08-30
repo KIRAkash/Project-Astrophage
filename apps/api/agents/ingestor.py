@@ -78,7 +78,11 @@ async def _map_chunks_local(chunks: list, log_callback=None) -> list:
     prev_summary = ""
     for i, chunk in enumerate(chunks):
         if log_callback:
-            await log_callback("map_reduce_progress", {"chunk": i + 1, "total_chunks": len(chunks)})
+            await log_callback("map_reduce_progress", {
+                "chunk": i + 1,
+                "total_chunks": len(chunks),
+                "message": f"Analyzing code modules ({i + 1}/{len(chunks)})"
+            })
         logger.info(f"[MAP/local] Summarising chunk {i + 1}/{len(chunks)}...")
 
         context_hint = (
@@ -105,7 +109,11 @@ async def _map_chunks_remote(chunks: list, log_callback=None) -> list:
     if log_callback:
         await log_callback(
             "map_reduce_progress",
-            {"status": "running_concurrently", "total_chunks": len(chunks)}
+            {
+                "status": "running_concurrently",
+                "total_chunks": len(chunks),
+                "message": f"Analyzing {len(chunks)} code modules in parallel"
+            }
         )
     items = [
         {"prompt": f"Summarise the purpose of each file below in 1–2 sentences each.\n\n{chunk}",
@@ -175,7 +183,11 @@ async def run_ingestor(context, sources: list = None, tokens: dict = None, log_c
             s_config = source.get('config') if isinstance(source, dict) else getattr(source, 'config', None)
 
             if log_callback:
-                await log_callback("source_scanning", {"source": s_url, "type": s_type})
+                await log_callback("source_scanning", {
+                    "source": s_url,
+                    "type": s_type,
+                    "message": f"Scanning {s_type.upper() if s_type else 'source'} structure and configuration"
+                })
 
             def _on_progress(event_name, data):
                 if log_callback:
@@ -190,31 +202,30 @@ async def run_ingestor(context, sources: list = None, tokens: dict = None, log_c
                 content = await ingest_source(s_type, s_url, tokens, config=s_config, on_progress=_on_progress)
                 raw_content += f"\n\n=== SOURCE: {s_url} ===\n{content}"
                 if log_callback:
-                    await log_callback("source_downloaded", {"source": s_url, "chars": len(content)})
+                    await log_callback("source_downloaded", {
+                        "source": s_url,
+                        "type": s_type,
+                        "message": f"Successfully ingested codebase and documents from {s_type.upper() if s_type else 'source'}"
+                    })
             except Exception as e:
                 raw_content += f"\n\n=== SOURCE: {s_url} ===\n[Ingestion failed: {e}]"
 
 
         # Archive raw content
         try:
-            gcs_path = upload_content(context.kb_id, "raw_ingest.txt", raw_content)
+            upload_content(context.kb_id, "raw_ingest.txt", raw_content)
             if log_callback:
-                await log_callback("archive_uploaded", {"path": gcs_path, "filename": "raw_ingest.txt"})
+                await log_callback("archive_uploaded", {
+                    "message": "Source snapshot securely archived for synthesis"
+                })
         except Exception as e:
             logger.warning(f"Local archive save failed: {e}")
 
 
     mode = get_env_var("AI_MODE", getattr(settings, "AI_MODE", "remote"))
-    model_label = (
-        get_env_var("GEMMA_MODEL", getattr(settings, "GEMMA_MODEL", "gemma"))
-        if mode == "local"
-        else get_env_var("GEMINI_MODEL", getattr(settings, "GEMINI_MODEL", "gemini-3.5-flash-lite"))
-    )
     if log_callback:
         await log_callback("llm_analysis_started", {
-            "mode": mode,
-            "model": model_label,
-            "chars_to_analyze": len(raw_content),
+            "message": "Analyzing application structure, interfaces, and architecture"
         })
 
     # ── Mode-specific map-reduce ──────────────────────────────────────────────
@@ -226,7 +237,9 @@ async def run_ingestor(context, sources: list = None, tokens: dict = None, log_c
             f"({len(raw_content)} chars). Single Gemini pass."
         )
         if log_callback:
-            await log_callback("inline_pass_started", {"chars": len(raw_content)})
+            await log_callback("inline_pass_started", {
+                "message": "Synthesizing comprehensive architectural blueprint"
+            })
 
         architecture_index = await llm_client.generate(
             prompt=(
@@ -246,7 +259,10 @@ async def run_ingestor(context, sources: list = None, tokens: dict = None, log_c
         logger.info(f"Chunked codebase into {len(chunks)} chunks (chunk_size={chunk_size}, mode={mode})")
 
         if log_callback:
-            await log_callback("map_reduce_started", {"total_chunks": len(chunks)})
+            await log_callback("map_reduce_started", {
+                "total_chunks": len(chunks),
+                "message": f"Analyzing codebase across {len(chunks)} modular segments"
+            })
 
         # MAP
         if mode == "local":

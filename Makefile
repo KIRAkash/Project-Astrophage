@@ -69,7 +69,8 @@ stop-all:
 	@# Fallback: forcefully kill orphaned Next.js and FastAPI servers
 	@lsof -t -i:3000 | xargs kill -9 2>/dev/null || true
 	@lsof -t -i:8000 | xargs kill -9 2>/dev/null || true
-	@pkill -f "celery -A workers.tasks" 2>/dev/null || true
+	@pkill -9 -f "celery -A api.workers.tasks" 2>/dev/null || true
+	@pkill -9 -f "celery" 2>/dev/null || true
 	@echo "All background services stopped."
 
 clean-logs:

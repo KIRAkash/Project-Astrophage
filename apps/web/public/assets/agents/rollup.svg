@@ -1,0 +1,16 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="rollupGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+  <circle cx="25" cy="25" r="6" fill="url(#rollupGrad)"/>
+  <circle cx="25" cy="50" r="6" fill="url(#rollupGrad)"/>
+  <circle cx="25" cy="75" r="6" fill="url(#rollupGrad)"/>
+  <path d="M 35 25 C 50 25, 60 40, 65 50" fill="none" stroke="url(#rollupGrad)" stroke-width="3" stroke-dasharray="4,4"/>
+  <path d="M 35 50 L 60 50" fill="none" stroke="url(#rollupGrad)" stroke-width="3" stroke-dasharray="4,4"/>
+  <path d="M 35 75 C 50 75, 60 60, 65 50" fill="none" stroke="url(#rollupGrad)" stroke-width="3" stroke-dasharray="4,4"/>
+  <circle cx="70" cy="50" r="16" fill="none" stroke="url(#rollupGrad)" stroke-width="4"/>
+  <circle cx="70" cy="50" r="6" fill="#fff"/>
+</svg>

@@ -19,6 +19,7 @@ export const api = {
   createApp: (orgId: string, data: Partial<KnowledgeBase>) => apiFetch(`/api/orgs/${orgId}/apps`, { method: 'POST', body: JSON.stringify(data) }) as Promise<KnowledgeBase>,
   getKB: (id: string) => apiFetch(`/api/kb/${id}`) as Promise<KnowledgeBase & { events: any[] }>,
   syncKB: (id: string) => apiFetch(`/api/kb/${id}/sync`, { method: 'POST' }) as Promise<KnowledgeBase & { events: any[] }>,
+  addKBSource: (id: string, source: any) => apiFetch(`/api/kb/${id}/add-source`, { method: 'POST', body: JSON.stringify(source) }) as Promise<{ status: string; message: string; kb: KnowledgeBase & { events: any[] } }>,
   checkKBUpdates: (id: string) => apiFetch(`/api/kb/${id}/check-updates`, { method: 'POST' }) as Promise<{
     status: string;
     message?: string;
@@ -42,4 +43,5 @@ export const api = {
   listKBs: () => apiFetch('/api/kb') as Promise<KnowledgeBase[]>,
   getKBTree: (id: string) => apiFetch(`/api/kb/${id}/tree`) as Promise<{tree: {path: string, type: string, sha: string}[]}>,
   getKBFile: (id: string, path: string) => apiFetch(`/api/kb/${id}/file?path=${encodeURIComponent(path)}`) as Promise<{content: string}>,
+  resolveKB: (target: string) => apiFetch(`/api/kb/resolve?target=${encodeURIComponent(target)}`) as Promise<{kb_id: string, app_name: string, git_repo_url: string}>,
 };

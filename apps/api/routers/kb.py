@@ -26,9 +26,14 @@ async def get_kb(kb_id: str, db: AsyncSession = Depends(get_db)):
     except ValueError:
         raise HTTPException(status_code=404, detail="KB not found")
     result = await db.execute(
-        select(KnowledgeBase).options(selectinload(KnowledgeBase.events)).where(KnowledgeBase.id == val)
+        select(KnowledgeBase).options(
+            selectinload(KnowledgeBase.events),
+            selectinload(KnowledgeBase.source_monitors)
+        ).where(KnowledgeBase.id == val)
     )
     kb = result.scalars().first()
+    if not kb:
+        raise HTTPException(status_code=404, detail="KB not found")
     return kb
 
 @router.post("/api/kb/{kb_id}/sync", response_model=KBDetailResponse)
@@ -42,14 +47,17 @@ async def sync_kb_status(kb_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="KB not found")
     
     result = await db.execute(
-        select(KnowledgeBase).options(selectinload(KnowledgeBase.events)).where(KnowledgeBase.id == val)
+        select(KnowledgeBase).options(
+            selectinload(KnowledgeBase.events),
+            selectinload(KnowledgeBase.source_monitors)
+        ).where(KnowledgeBase.id == val)
     )
     kb = result.scalars().first()
     if not kb:
         raise HTTPException(status_code=404, detail="KB not found")
 
     if kb.status == KBStatus.in_review and kb.pr_url:
-        # e.g. https://github.com/Astrophase/kb-astrophage-cosimcity/pull/1
+        # e.g. https://github.com/astrophage-org/kb-astrophage-cosimcity/pull/1
         parts = kb.pr_url.split("/")
         if len(parts) >= 4:
             owner = parts[-4]
@@ -243,6 +251,7 @@ async def check_kb_updates(kb_id: str, request: Request, db: AsyncSession = Depe
         "triggered_count": triggered_count,
     }
 
+@router.get("/api/kb/{kb_id}/stream")
 async def kb_stream(kb_id: str, request: Request):
     sse_manager = request.app.state.sse_manager
     queue = await sse_manager.subscribe(str(kb_id))
@@ -273,7 +282,10 @@ async def restart_kb(kb_id: str, db: AsyncSession = Depends(get_db)):
     except ValueError:
         raise HTTPException(status_code=404, detail="KB not found")
     result = await db.execute(
-        select(KnowledgeBase).options(selectinload(KnowledgeBase.events)).where(KnowledgeBase.id == val)
+        select(KnowledgeBase).options(
+            selectinload(KnowledgeBase.events),
+            selectinload(KnowledgeBase.source_monitors)
+        ).where(KnowledgeBase.id == val)
     )
     kb = result.scalars().first()
     if not kb:
@@ -296,7 +308,10 @@ async def restart_kb(kb_id: str, db: AsyncSession = Depends(get_db)):
     generation_pipeline_task.delay(str(kb.id))
     
     result = await db.execute(
-        select(KnowledgeBase).options(selectinload(KnowledgeBase.events)).where(KnowledgeBase.id == val)
+        select(KnowledgeBase).options(
+            selectinload(KnowledgeBase.events),
+            selectinload(KnowledgeBase.source_monitors)
+        ).where(KnowledgeBase.id == val)
     )
     return result.scalars().first()
 
@@ -310,7 +325,10 @@ async def retry_kb(kb_id: str, db: AsyncSession = Depends(get_db)):
     except ValueError:
         raise HTTPException(status_code=404, detail="KB not found")
     result = await db.execute(
-        select(KnowledgeBase).options(selectinload(KnowledgeBase.events)).where(KnowledgeBase.id == val)
+        select(KnowledgeBase).options(
+            selectinload(KnowledgeBase.events),
+            selectinload(KnowledgeBase.source_monitors)
+        ).where(KnowledgeBase.id == val)
     )
     kb = result.scalars().first()
     if not kb:
@@ -330,7 +348,10 @@ async def retry_kb(kb_id: str, db: AsyncSession = Depends(get_db)):
     generation_pipeline_task.delay(str(kb.id))
     
     result = await db.execute(
-        select(KnowledgeBase).options(selectinload(KnowledgeBase.events)).where(KnowledgeBase.id == val)
+        select(KnowledgeBase).options(
+            selectinload(KnowledgeBase.events),
+            selectinload(KnowledgeBase.source_monitors)
+        ).where(KnowledgeBase.id == val)
     )
     return result.scalars().first()
 
@@ -365,9 +386,48 @@ async def upload_file(
     }
 
 
+@router.get("/api/kb/resolve")
+async def resolve_kb(target: str, db: AsyncSession = Depends(get_db)):
+    """Resolve a target identifier (repo name, app slug, or UUID) to a Knowledge Base ID."""
+    clean_target = target.strip().lower()
+    
+    # 1. Try UUID match
+    try:
+        val = UUID(clean_target)
+        res = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == val))
+        kb = res.scalars().first()
+        if kb:
+            return {"kb_id": str(kb.id), "app_name": kb.app_name, "git_repo_url": kb.git_repo_url}
+    except ValueError:
+        pass
+
+    # 2. Query all KBs and match by git_repo_url or app_name
+    res = await db.execute(select(KnowledgeBase))
+    all_kbs = res.scalars().all()
+
+    for kb in all_kbs:
+        # Match git_repo_url ending with target
+        if kb.git_repo_url:
+            repo_slug = kb.git_repo_url.rstrip("/").split("/")[-1].lower()
+            if repo_slug == clean_target or repo_slug.replace(".git", "") == clean_target:
+                return {"kb_id": str(kb.id), "app_name": kb.app_name, "git_repo_url": kb.git_repo_url}
+
+        # Match app_name exact or normalized
+        clean_app = kb.app_name.lower().replace("_", "-").replace(" ", "-")
+        if clean_app == clean_target or kb.app_name.lower() == clean_target:
+            return {"kb_id": str(kb.id), "app_name": kb.app_name, "git_repo_url": kb.git_repo_url}
+
+        # Match repo without org prefix (e.g., target: kb-apex-financial-services-order-matching-engine, app: order-matching-engine)
+        if clean_target.endswith(clean_app) or clean_target.endswith(clean_app.replace("-", "")):
+            return {"kb_id": str(kb.id), "app_name": kb.app_name, "git_repo_url": kb.git_repo_url}
+
+    raise HTTPException(status_code=404, detail=f"Target KB '{target}' not found")
+
+
 @router.get("/api/kb/{kb_id}/tree")
 async def get_kb_tree(kb_id: str, db: AsyncSession = Depends(get_db)):
     from ..services.gitops import get_github_client
+    from ..services.local_storage import load_checkpoint_json
     try:
         val = UUID(kb_id)
     except ValueError:
@@ -376,25 +436,38 @@ async def get_kb_tree(kb_id: str, db: AsyncSession = Depends(get_db)):
         select(KnowledgeBase).where(KnowledgeBase.id == val)
     )
     kb = result.scalars().first()
-    if not kb or not kb.git_repo_url:
-        raise HTTPException(status_code=404, detail="KB repo not found")
+    if not kb:
+        raise HTTPException(status_code=404, detail="KB not found")
         
-    parts = kb.git_repo_url.split("/")
-    if len(parts) >= 2:
-        repo_full_name = f"{parts[-2]}/{parts[-1]}"
-        g = get_github_client()
-        try:
-            repo = g.get_repo(repo_full_name)
-            branch = repo.get_branch(repo.default_branch)
-            tree = repo.get_git_tree(branch.commit.sha, recursive=True)
-            return {"tree": [{"path": el.path, "type": el.type, "sha": el.sha} for el in tree.tree]}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-    raise HTTPException(status_code=400, detail="Invalid repo url")
+    if kb.git_repo_url:
+        parts = kb.git_repo_url.split("/")
+        if len(parts) >= 2:
+            repo_full_name = f"{parts[-2]}/{parts[-1]}"
+            try:
+                g = get_github_client()
+                repo = g.get_repo(repo_full_name)
+                branch_name = repo.default_branch
+                try:
+                    branch = repo.get_branch(branch_name)
+                except Exception:
+                    branch = repo.get_branch("kb/initial-generation")
+                tree = repo.get_git_tree(branch.commit.sha, recursive=True)
+                return {"tree": [{"path": el.path, "type": el.type, "sha": el.sha} for el in tree.tree]}
+            except Exception as e:
+                logger.warning(f"Failed to fetch tree from GitHub for {repo_full_name}: {e}. Falling back to compiled checkpoints.")
+
+    # Local / GCS checkpoint fallback
+    compiled_files = load_checkpoint_json(kb_id, "compiled_files.json")
+    if compiled_files:
+        tree = [{"path": p, "type": "blob", "sha": "local"} for p in sorted(compiled_files.keys())]
+        return {"tree": tree}
+
+    raise HTTPException(status_code=404, detail="KB files not found")
 
 @router.get("/api/kb/{kb_id}/file")
 async def get_kb_file(kb_id: str, path: str, db: AsyncSession = Depends(get_db)):
     from ..services.gitops import get_github_client
+    from ..services.local_storage import load_checkpoint_json
     try:
         val = UUID(kb_id)
     except ValueError:
@@ -403,23 +476,38 @@ async def get_kb_file(kb_id: str, path: str, db: AsyncSession = Depends(get_db))
         select(KnowledgeBase).where(KnowledgeBase.id == val)
     )
     kb = result.scalars().first()
-    if not kb or not kb.git_repo_url:
-        raise HTTPException(status_code=404, detail="KB repo not found")
+    if not kb:
+        raise HTTPException(status_code=404, detail="KB not found")
         
-    parts = kb.git_repo_url.split("/")
-    if len(parts) >= 2:
-        repo_full_name = f"{parts[-2]}/{parts[-1]}"
-        g = get_github_client()
-        try:
-            repo = g.get_repo(repo_full_name)
-            file_content = repo.get_contents(path)
-            if isinstance(file_content, list):
-                raise HTTPException(status_code=400, detail="Path is a directory")
-            content = base64.b64decode(file_content.content).decode('utf-8')
-            return {"content": content}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-    raise HTTPException(status_code=400, detail="Invalid repo url")
+    # Clean and normalize path
+    clean_path = path.split("#")[0].strip().lstrip("./")
+    if not clean_path.endswith(".md") and not "." in clean_path.split("/")[-1]:
+        clean_path = f"{clean_path}.md"
+
+    if kb.git_repo_url:
+        parts = kb.git_repo_url.split("/")
+        if len(parts) >= 2:
+            repo_full_name = f"{parts[-2]}/{parts[-1]}"
+            try:
+                g = get_github_client()
+                repo = g.get_repo(repo_full_name)
+                try:
+                    file_content = repo.get_contents(clean_path)
+                except Exception:
+                    file_content = repo.get_contents(clean_path, ref="kb/initial-generation")
+                if isinstance(file_content, list):
+                    raise HTTPException(status_code=400, detail="Path is a directory")
+                content = base64.b64decode(file_content.content).decode('utf-8')
+                return {"content": content}
+            except Exception as e:
+                logger.warning(f"Failed to fetch file '{clean_path}' from GitHub: {e}. Falling back to compiled checkpoints.")
+
+    # Local / GCS checkpoint fallback
+    compiled_files = load_checkpoint_json(kb_id, "compiled_files.json")
+    if compiled_files and clean_path in compiled_files:
+        return {"content": compiled_files[clean_path]}
+
+    raise HTTPException(status_code=404, detail=f"File '{clean_path}' not found in KB")
 
 
 @router.get("/api/kb/{kb_id}/digest")
@@ -458,6 +546,242 @@ async def get_kb_lint_report(kb_id: str, db: AsyncSession = Depends(get_db)):
 
     report = run_linter(cached_files)
     return report
+
+
+
+@router.post("/api/kb/{kb_id}/add-source", response_model=dict)
+async def add_source_to_kb(kb_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    from ..db.schemas import AddSourceRequest
+    from ..db.models import SourceMonitor, MonitorMode
+    from ..workers.tasks import add_source_pipeline_task
+    from ..services.gitops import register_push_webhook
+    
+    body = await request.json()
+    source_req = AddSourceRequest(**body)
+    
+    try:
+        val = UUID(kb_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="KB not found")
+        
+    result = await db.execute(
+        select(KnowledgeBase).options(
+            selectinload(KnowledgeBase.events),
+            selectinload(KnowledgeBase.source_monitors)
+        ).where(KnowledgeBase.id == val)
+    )
+    kb = result.scalars().first()
+    if not kb:
+        raise HTTPException(status_code=404, detail="KB not found")
+        
+    # Check duplicates
+    existing_urls = [m.target_url for m in (kb.source_monitors or [])]
+    if source_req.url in existing_urls:
+        return {
+            "status": "duplicate",
+            "message": f"Source {source_req.url} is already registered.",
+            "source_added": None,
+            "kb": kb
+        }
+        
+    # Append to kb.source_urls
+    sources = kb.source_urls or []
+    new_source_dict = {
+        "type": source_req.type,
+        "url": source_req.url,
+        "incremental_enabled": source_req.incremental_enabled,
+        "config": source_req.config or {}
+    }
+    
+    # We must explicitly set to trigger SQLAlchemy JSON update
+    new_sources = list(sources)
+    new_sources.append(new_source_dict)
+    kb.source_urls = new_sources
+    
+    # Register source monitor
+    webhook_id = None
+    monitor_mode = MonitorMode.polling
+    
+    from ..core.config import settings
+    if source_req.type == 'github' and settings.SOURCE_MONITOR_MODE == 'webhook':
+        repo_name = "/".join(source_req.url.rstrip("/").split("/")[-2:])
+        try:
+            webhook_id = register_push_webhook(
+                repo_name,
+                f"{settings.WEBHOOK_BASE_URL}/api/webhooks/github/push"
+            )
+            monitor_mode = MonitorMode.webhook
+        except Exception:
+            monitor_mode = MonitorMode.polling
+
+    new_monitor = SourceMonitor(
+        kb_id=kb.id,
+        source_type=source_req.type,
+        repo_url=source_req.url,
+        source_url=source_req.url,
+        incremental_enabled=source_req.incremental_enabled,
+        config=source_req.config or {},
+        last_sync_state={},
+        webhook_id=webhook_id,
+        monitor_mode=monitor_mode,
+    )
+    db.add(new_monitor)
+    await db.commit()
+    await db.refresh(kb)
+    
+    # Trigger Pipeline Task
+    add_source_pipeline_task.delay(str(kb.id), new_source_dict)
+    
+    return {
+        "status": "pipeline_started",
+        "message": "Source added and incremental pipeline started",
+        "source_added": new_source_dict,
+        "kb": kb
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
+# PUBLIC (no-auth) endpoints for the `ap` CLI / Astrophage Skill
+# ─────────────────────────────────────────────────────────────────
+
+def _normalize_repo_url(url: str) -> str:
+    """
+    Normalize a Git repo URL for reliable comparison.
+    Handles: https://github.com/org/repo.git  git@github.com:org/repo.git
+    Returns:  github.com/org/repo  (lowercase, no protocol, no .git suffix)
+    """
+    import re
+    url = url.strip().lower()
+    # Convert SSH → HTTPS style: git@github.com:org/repo → github.com/org/repo
+    url = re.sub(r'^git@([^:]+):', r'\1/', url)
+    # Strip protocol prefix
+    url = re.sub(r'^https?://', '', url)
+    # Strip trailing .git
+    url = re.sub(r'\.git$', '', url)
+    # Strip trailing slash
+    url = url.rstrip('/')
+    return url
+
+
+@router.get("/api/public/kb/discover", tags=["Public"])
+async def public_discover_kb(repo_url: str, db: AsyncSession = Depends(get_db)):
+    """
+    No-auth endpoint: check if a source repo URL has an Astrophage KB.
+    Used by the `ap discover` CLI command.
+
+    Returns KB metadata + linked KBs if found, or a list of all published KBs
+    so the caller can pick the closest match.
+    """
+    from ..db.models import KBStatus
+    from sqlalchemy.orm import selectinload
+
+    normalized_query = _normalize_repo_url(repo_url)
+
+    # Fetch all published KBs with their source monitors
+    result = await db.execute(
+        select(KnowledgeBase)
+        .options(
+            selectinload(KnowledgeBase.source_monitors),
+            selectinload(KnowledgeBase.org),
+        )
+        .where(KnowledgeBase.status == KBStatus.published)
+    )
+    all_kbs = result.scalars().all()
+
+    matched_kb = None
+    for kb in all_kbs:
+        # Check against kb-level git_repo_url (the KB output repo — not the source)
+        # and all source_urls / source monitor URLs
+        candidate_urls = []
+        if kb.source_urls:
+            for src in kb.source_urls:
+                if isinstance(src, dict):
+                    candidate_urls.append(src.get("url", ""))
+                elif isinstance(src, str):
+                    candidate_urls.append(src)
+        for monitor in (kb.source_monitors or []):
+            candidate_urls.append(monitor.repo_url or "")
+            candidate_urls.append(monitor.source_url or "")
+
+        for candidate in candidate_urls:
+            if candidate and _normalize_repo_url(candidate) == normalized_query:
+                matched_kb = kb
+                break
+        if matched_kb:
+            break
+
+    if matched_kb:
+        # Find linked KBs: other published KBs in the same org
+        siblings = [
+            {
+                "kb_name": f"openkb-{kb.app_name.lower().replace(' ', '-')}",
+                "app_name": kb.app_name,
+                "kb_repo_url": kb.git_repo_url,
+                "status": kb.status.value,
+            }
+            for kb in all_kbs
+            if kb.id != matched_kb.id and kb.org_id == matched_kb.org_id
+        ]
+        return {
+            "found": True,
+            "kb_name": f"openkb-{matched_kb.app_name.lower().replace(' ', '-')}",
+            "app_name": matched_kb.app_name,
+            "kb_repo_url": matched_kb.git_repo_url,
+            "status": matched_kb.status.value,
+            "org_name": matched_kb.org.name if matched_kb.org else None,
+            "org_slug": matched_kb.org.slug if matched_kb.org else None,
+            "linked_kbs": siblings,
+        }
+
+    # Not found — return full list so the caller can offer alternatives
+    suggestions = [
+        {
+            "kb_name": f"openkb-{kb.app_name.lower().replace(' ', '-')}",
+            "app_name": kb.app_name,
+            "kb_repo_url": kb.git_repo_url,
+            "status": kb.status.value,
+            "org_name": kb.org.name if kb.org else None,
+        }
+        for kb in all_kbs
+    ]
+    return {
+        "found": False,
+        "kb_name": None,
+        "kb_repo_url": None,
+        "status": None,
+        "linked_kbs": [],
+        "suggestions": suggestions,
+    }
+
+
+@router.get("/api/public/kb/list", tags=["Public"])
+async def public_list_kbs(db: AsyncSession = Depends(get_db)):
+    """
+    No-auth endpoint: list all published Astrophage KBs.
+    Used by the `ap list` CLI command.
+    """
+    from ..db.models import KBStatus
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(
+        select(KnowledgeBase)
+        .options(selectinload(KnowledgeBase.org))
+        .where(KnowledgeBase.status == KBStatus.published)
+        .order_by(KnowledgeBase.updated_at.desc())
+    )
+    kbs = result.scalars().all()
+    return [
+        {
+            "kb_name": f"openkb-{kb.app_name.lower().replace(' ', '-')}",
+            "app_name": kb.app_name,
+            "kb_repo_url": kb.git_repo_url,
+            "status": kb.status.value,
+            "org_name": kb.org.name if kb.org else None,
+            "org_slug": kb.org.slug if kb.org else None,
+            "updated_at": kb.updated_at.isoformat() if kb.updated_at else None,
+        }
+        for kb in kbs
+    ]
 
 
 @router.post("/api/kb/{kb_id}/guard")
