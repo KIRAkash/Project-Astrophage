@@ -32,7 +32,9 @@ Key files to check:
 
 ## Cross-KB links
 
-If you see `[[kb:other-app/page]]` in a KB file:
+If you see `ap:other-app/page` or `[[kb:other-app/page]]` in a KB file:
+
+You can and should traverse between multiple KBs to understand information and links using the ap commands.
 ```bash
 ap links <file>          # auto-fetch linked KB and resolve paths
 ap fetch other-app       # or explicitly fetch the linked KB
@@ -41,6 +43,6 @@ ap fetch other-app       # or explicitly fetch the linked KB
 ## No KB found?
 
 ```bash
-ap list                  # see all available KBs
+If ap discover fails, review the printed list of available KBs and explicitly run `ap link <kb_repo_url>` or `ap fetch <kb-name>` with the relevant one.
 # Onboard this repo: https://astrophage.app/onboard
 ```

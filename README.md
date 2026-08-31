@@ -383,6 +383,30 @@ All cross-references use `[[wikilinks]]` so the entire KB is navigable in Obsidi
 |  | 💫 **Awaiting Launch** | PR is open on GitHub — awaiting human review |
 |  | 🌍 **In Orbit** | PR merged, KB is live and monitored |
 
+
+---
+
+## 🤖 AI Agent Integration (Astrophage Skill)
+
+Astrophage gives your AI coding agents (Claude, Cursor, Antigravity, Copilot) instant, structured access to your generated architecture documentation. This stops hallucinations and saves thousands of context tokens.
+
+To install the Astrophage CLI and give your agent superpowers:
+
+```bash
+# 1. Install the CLI
+curl -fsSL https://raw.githubusercontent.com/KIRAkash/Project-Astrophage/main/astrophage-skill/install.sh | bash
+
+# 2. Initialize for your agent (inside your repo)
+ap init cursor        # For Cursor
+ap init claude        # For Claude Code
+ap init antigravity   # For Google Antigravity
+ap init copilot       # For GitHub Copilot
+```
+
+For more details, see the [Astrophage Skill README](astrophage-skill/README.md).
+
+---
+
 ## ⚙️ Setup & Quickstart
 
 For detailed, step-by-step instructions on setting up your environment, including what secrets are compulsory vs optional, please refer to our comprehensive **[Local Setup Guide](SETUP.md)**.

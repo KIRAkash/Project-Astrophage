@@ -102,20 +102,34 @@ ASTROPHAGE_API=https://your-astrophage-instance.app
 
 ## Agent Integration
 
+You can easily initialize the Astrophage skill for your favorite AI agent by running the `ap init` command within your repository:
+
 ### Claude Code
-Copy `integrations/claude/CLAUDE.md` to your repo root (or `~/.claude/`) — Claude Code discovers it automatically.
+```bash
+ap init claude
+```
+*Creates a `CLAUDE.md` memory file in your project.*
 
 ### Cursor
-Append `integrations/cursor/.cursorrules` content to your project's `.cursorrules` file.
-
-### Codex / OpenAI Agents
-Copy `integrations/codex/AGENTS.md` to your repo root — follows the AGENTS.md spec.
+```bash
+ap init cursor
+```
+*Appends Astrophage instructions to your project's `.cursorrules` file.*
 
 ### Antigravity
-Copy `integrations/antigravity/SKILL.md` to your Antigravity skills directory. The skill is auto-discovered.
+```bash
+ap init antigravity
+```
+*Installs the skill directly into `~/.gemini/config/skills` globally.*
+
+### GitHub Copilot
+```bash
+ap init copilot
+```
+*Creates `.github/copilot-instructions.md`.*
 
 ### Any other agent
-Point the agent to `SKILL.md` in this directory. It is written to be readable by any LLM-based coding agent.
+Point the agent to `SKILL.md` in this directory. It is written to be universally readable by any LLM-based coding agent.
 
 ---
 

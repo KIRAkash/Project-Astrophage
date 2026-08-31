@@ -70,12 +70,12 @@ cmd_resolve_links() {
     links=$(python3 -c "
 import sys, re
 text = open(sys.argv[1], errors='replace').read()
-for m in re.findall(r'\[\[kb:[^\]]+\]\]', text):
+for m in re.findall(r'\[\[kb:[^\]]+\]\]|\bap:[A-Za-z0-9_-]+/[A-Za-z0-9_/-]+(?:\.md)?', text):
     print(m)
 " "$file" 2>/dev/null | sort -u)
   else
     # macOS ERE: [[] matches literal [
-    links=$(grep -oE '[[][[]kb:[^/]]+/[^]]+[]][]]' "$file" 2>/dev/null | sort -u || true)
+    links=$(grep -oE '[[][[]kb:[^/]]+/[^]]+[]][]|\bap:[A-Za-z0-9_-]+/[A-Za-z0-9_/-]+(\.md)?' "$file" 2>/dev/null | sort -u || true)
   fi
 
   if [[ -z "$links" ]]; then
@@ -90,11 +90,15 @@ for m in re.findall(r'\[\[kb:[^\]]+\]\]', text):
   while IFS= read -r link; do
     # Parse [[kb:app-name/path]]
     local inner="${link#\[\[kb:}"
+    if [[ "$link" == ap:* ]]; then
+      inner="${link#ap:}"
+      inner="${inner%.md}"
+    fi
     inner="${inner%\]\]}"
     local linked_kb_name="${inner%%/*}"
     local linked_path="${inner#*/}"
 
-    echo -e "  ${C_CYAN}[[kb:${linked_kb_name}/${linked_path}]]${C_RESET}"
+    echo -e "  ${C_CYAN}${link}${C_RESET}"
 
     # Check if already cloned
     local local_kb_path="${AP_CACHE_DIR}/openkb-${linked_kb_name}"

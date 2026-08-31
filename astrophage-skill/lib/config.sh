@@ -7,6 +7,11 @@
 # ── API endpoint ─────────────────────────────────────────────────────────────
 # Override by setting ASTROPHAGE_API in your shell environment or .env file.
 # Example: export ASTROPHAGE_API=https://api.astrophage.app
+# Load global overrides first
+if [[ -f "$HOME/.astrophage/.ap_global_config" ]]; then
+  source "$HOME/.astrophage/.ap_global_config"
+fi
+
 ASTROPHAGE_API="${ASTROPHAGE_API:-http://localhost:8000}"
 
 # ── Local KB cache directory ──────────────────────────────────────────────────

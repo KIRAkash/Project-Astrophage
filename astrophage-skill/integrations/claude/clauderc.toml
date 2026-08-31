@@ -1,0 +1,3 @@
+# Astrophage KB rules
+[rules]
+astrophage = "Use the `ap` CLI to understand architecture. Run `ap discover` first. If it fails, review the list and use `ap link <url>`. To search, use `ap search <query>`. You should traverse between KBs if you see `ap:app/path` links to find required info."

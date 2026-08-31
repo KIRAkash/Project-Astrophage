@@ -121,3 +121,27 @@ To stop the Docker infrastructure (Postgres & Redis):
 ```bash
 make stop-infra
 ```
+
+---
+
+## 🤖 Empowering Your AI Agents
+
+Once your services are running and your knowledge bases are generated, you should connect your AI coding agents to your documentation!
+
+The **Astrophage Skill** CLI (`ap`) allows agents like Cursor, Claude, Antigravity, and Copilot to autonomously query your documentation instead of hallucinating.
+
+```bash
+# 1. Install the CLI globally
+curl -fsSL https://raw.githubusercontent.com/KIRAkash/Project-Astrophage/main/astrophage-skill/install.sh | bash
+
+# 2. Configure the CLI to point to your local backend (if testing locally)
+ap config set api "http://localhost:8000"
+
+# 3. Inside any of your repositories, initialize your agent:
+ap init cursor        # For Cursor
+ap init claude        # For Claude Code
+ap init antigravity   # For Google Antigravity
+ap init copilot       # For GitHub Copilot
+```
+
+See `astrophage-skill/README.md` for full details.

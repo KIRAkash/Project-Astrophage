@@ -6,6 +6,11 @@ description: >
   data models, service dependencies, or architecture decisions. Auto-discovers
   and searches the KB for the current repo. Works with any repo that has been
   onboarded to an Astrophage instance.
+slash_commands:
+  - name: "/ap"
+    description: "Run Astrophage KB CLI commands directly (e.g. /ap search auth)"
+  - name: "/ap-discover"
+    description: "Auto-detect and clone the KB for this repo"
 triggers:
   - "understand the architecture"
   - "explain the codebase"

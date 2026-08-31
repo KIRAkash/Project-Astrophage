@@ -106,10 +106,10 @@ cmd_discover() {
 
   if [[ -z "$repo_url" ]]; then
     ap_warn "Not inside a Git repository (or no remote configured)."
-    echo ""
+    echo "" >&2
     ap_info "You can still manually fetch a KB:"
-    echo -e "  ${C_CYAN}ap list${C_RESET}           — see all available KBs"
-    echo -e "  ${C_CYAN}ap fetch <name>${C_RESET}   — pull a specific KB by name"
+    echo -e "  ${C_CYAN}ap list${C_RESET}           — see all available KBs" >&2
+    echo -e "  ${C_CYAN}ap fetch <name>${C_RESET}   — pull a specific KB by name" >&2
     return 1
   fi
 
@@ -176,19 +176,39 @@ cmd_discover() {
   else
     # Not found
     ap_warn "No Astrophage KB found for this repository."
-    echo ""
-
-    local suggestion_count
-    suggestion_count=$(json_array_len "$response" "suggestions")
-    if [[ "$suggestion_count" -gt 0 ]]; then
-      ap_info "Available KBs on this Astrophage instance:"
-      print_suggestions "$response"
-      echo ""
-      ap_info "To use one of these KBs: ${C_CYAN}ap fetch <kb-name>${C_RESET}"
+    echo "" >&2
+    ap_info "Fetching list of all available KBs..."
+    local list_response
+    list_response=$(ap_curl "${ASTROPHAGE_API}/api/public/kb/list" 2>/dev/null) || true
+    if [[ -n "$list_response" && "$list_response" != "[]" ]]; then
+      if ap_has jq; then
+        echo "$list_response" | jq -r '.[]? | "  • \(.kb_name)  [\(.app_name // "?")]  \(.kb_repo_url // "(no repo)")"' 2>/dev/null | head -20 >&2
+      elif ap_has python3; then
+        echo "$list_response" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    for s in d[:20]:
+        print(f\"  • {s.get('kb_name','?')}  [{s.get('app_name','?')}]  {s.get('kb_repo_url') or '(no repo)'}\")
+except:
+    pass
+" 2>/dev/null >&2
+      fi
+    else
+      local suggestion_count
+      suggestion_count=$(json_array_len "$response" "suggestions")
+      if [[ "$suggestion_count" -gt 0 ]]; then
+        ap_info "Suggestions from Astrophage instance:"
+        print_suggestions "$response" >&2
+      fi
     fi
 
-    echo -e "${C_YELLOW}📡 Onboard this repo to Astrophage:${C_RESET}"
-    echo -e "   ${C_CYAN}${AP_ONBOARD_URL}?repo=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${repo_url}', safe=''))" 2>/dev/null || echo "${repo_url}")${C_RESET}"
+    echo "" >&2
+    echo -e "${C_YELLOW}🤖 [AGENT INSTRUCTION] If you are an AI agent, please review the list above and rerun the 'ap link <kb_repo_url>' or 'ap fetch <kb_name>' command with the most relevant KB for this task.${C_RESET}" >&2
+    echo -e "👤 For human users: Use 'ap link <url>' with one of the URLs above, or onboard this repo:" >&2
+    local encoded_repo
+    encoded_repo=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${repo_url}', safe=''))" 2>/dev/null || echo "${repo_url}")
+    echo -e "   ${C_CYAN}${AP_ONBOARD_URL}?repo=${encoded_repo}${C_RESET}" >&2
     return 1
   fi
 }

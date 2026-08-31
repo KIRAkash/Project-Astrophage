@@ -5,6 +5,11 @@ description: >
   Auto-discovers and clones the KB for the current repo, searches it with ranked full-text results,
   reads specific KB files, and follows cross-KB wikilinks. Works offline once the KB is cloned.
   Compatible with Claude Code, Codex, Cursor, Antigravity, Copilot, and any agent that can run bash.
+slash_commands:
+  - name: "/ap"
+    description: "Run Astrophage KB CLI commands directly (e.g. /ap search auth)"
+  - name: "/ap-discover"
+    description: "Auto-detect and clone the KB for this repo"
 triggers:
   - "understand the codebase architecture"
   - "find the API spec"
@@ -138,7 +143,9 @@ When a file contains `[[kb:other-app/page]]` cross-KB links, `ap read` will auto
 
 ## Step 4 — Follow Cross-KB Links
 
-When the KB page you're reading references another service's KB with `[[kb:app-name/page]]` syntax:
+When the KB page you're reading references another service's KB (using either `ap:app-name/page` or `[[kb:app-name/page]]` syntax):
+
+**Agent Instruction**: You are fully capable of traversing between multiple KBs to understand the information and connections. If you find a format of `ap:` or `[[kb:]]`, which is the Astrophage format of linking between multiple repos, you should fetch the next repo to find that information if you need it.
 
 ```bash
 # See all cross-KB links in a file and fetch missing linked KBs:
@@ -153,6 +160,30 @@ ap read ~/.astrophage/openkb-order-service/summaries/events.md
 ```
 
 ---
+
+
+## Step 5 — Initialize Your Agent
+
+Run the init command for your preferred agent inside your repository. The CLI will automatically configure the correct rules and memory files.
+
+```bash
+ap init cursor        # Creates .cursorrules
+ap init claude        # Creates clauderc.toml
+ap init antigravity   # Installs directly into ~/.gemini/config/skills
+ap init copilot       # Creates .github/copilot-instructions.md
+```
+
+## Step 6 — Configuration & Manual Linking
+
+If Astrophage is hosted on a custom domain instead of localhost, or if the API fails to discover your KB:
+
+```bash
+# Change the Astrophage instance URL globally
+ap config set api https://astrophage.mycompany.com
+
+# Manually link a KB repository if auto-discovery fails
+ap link https://github.com/my-org/openkb-my-app
+```
 
 ## Other Useful Commands
 

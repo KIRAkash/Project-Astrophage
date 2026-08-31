@@ -41,6 +41,24 @@ shift || true
 case "$CMD" in
 
   # ── discover ───────────────────────────────────────────────────────────────
+  # ── init ────────────────────────────────────────────────────────────────
+  init)
+    source "$AP_LIB_DIR/init.sh"
+    cmd_init "${1:-}"
+    ;;
+
+  # ── config ──────────────────────────────────────────────────────────────
+  config)
+    source "$AP_LIB_DIR/config_cmd.sh"
+    cmd_config "$@"
+    ;;
+
+  # ── link ────────────────────────────────────────────────────────────────
+  link)
+    source "$AP_LIB_DIR/link.sh"
+    cmd_link "${1:-}"
+    ;;
+
   discover)
     source "$AP_LIB_DIR/discover.sh"
     cmd_discover "${1:-}"
@@ -184,6 +202,9 @@ case "$CMD" in
     echo ""
     echo -e "${C_BOLD}${C_CYAN}ap${C_RESET} — Astrophage Knowledge Base CLI"
     echo ""
+    echo -e "  ${C_BOLD}ap init${C_RESET}    <agent>     Initialize skill for cursor/claude/antigravity/copilot"
+    echo -e "  ${C_BOLD}ap config${C_RESET}  set <k> <v> Set global config (e.g., api)"
+    echo -e "  ${C_BOLD}ap link${C_RESET}    <url>       Manually link a KB repo to current codebase"
     echo -e "  ${C_BOLD}ap discover${C_RESET}            Auto-detect & clone KB for current git repo"
     echo -e "  ${C_BOLD}ap search${C_RESET}  <query>     Search the KB (ranked markdown search)"
     echo -e "  ${C_BOLD}ap read${C_RESET}    <file>      Print a KB file (e.g. summaries/api-spec.md)"
