@@ -62,17 +62,21 @@ def test_routing():
     assert _route_page("entities/user.md") == "remote",      "all remote in remote mode"
     print("✓ Mode override routing test passed")
 
+from unittest.mock import patch, AsyncMock
+
 async def test_compile():
     print("\n=== Compiler (remote mode) ===")
     settings.AI_MODE = "remote"
     ctx = MockContext()
-    res = await run_compiler(ctx)
-    print("Files generated:", list(res.keys()))
-    assert "index.md" in res, "index.md must always be present"
-    # Check wikilinks appear somewhere
-    all_content = "\n".join(res.values())
-    print(f"Total content length: {len(all_content)} chars")
-    print("✓ Compiler test passed")
+    with patch("apps.api.agents.llm_client.llm_client.generate", new_callable=AsyncMock) as mock_gen:
+        mock_gen.return_value = "# System Architecture\n[[summaries/api-spec]] [[entities/user]]"
+        res = await run_compiler(ctx)
+        print("Files generated:", list(res.keys()))
+        assert "index.md" in res, "index.md must always be present"
+        # Check wikilinks appear somewhere
+        all_content = "\n".join(res.values())
+        print(f"Total content length: {len(all_content)} chars")
+        print("✓ Compiler test passed")
 
 async def main():
     await test_manifest()

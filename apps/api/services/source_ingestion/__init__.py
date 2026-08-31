@@ -44,7 +44,7 @@ def register_connector(source_type: str, connector_cls: Type[BaseConnector], tok
         TOKEN_KEY_MAP[source_type.lower()] = token_key
     logger.info(f"Registered connector '{source_type}' -> {connector_cls.__name__}")
 
-def get_connector(source_type: str, client: httpx.AsyncClient, concurrency_limit: int = 10) -> BaseConnector:
+def get_connector(source_type: str, client: Optional[httpx.AsyncClient] = None, concurrency_limit: int = 10) -> BaseConnector:
     """Instantiate connector instance by source type."""
     st = source_type.lower()
     if st not in CONNECTOR_REGISTRY:
@@ -61,17 +61,30 @@ async def ingest_source(
 ) -> str:
     """Universal ingestion entry point for any registered source."""
     tokens = tokens or {}
-    token_key = TOKEN_KEY_MAP.get(source_type.lower())
-    token = tokens.get(token_key) if token_key else None
-
-    # Fallback check directly from env if not provided in dictionary
-    if not token and token_key:
-        from ...core.config import settings, get_env_var
-        token = get_env_var(token_key, getattr(settings, token_key, ""))
-
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        connector = get_connector(source_type, client)
-        return await connector.ingest(url, token, config=config, on_progress=on_progress)
+    st = source_type.lower()
+    if st == 'github':
+        return await fetch_github_repo(url, tokens.get('GITHUB_APP_TOKEN'), config=config, on_progress=on_progress)
+    elif st == 'confluence':
+        return await fetch_confluence_space(url, tokens.get('CONFLUENCE_API_TOKEN'), config=config, on_progress=on_progress)
+    elif st == 'notion':
+        return await fetch_notion_page(url, tokens.get('NOTION_API_TOKEN'), config=config, on_progress=on_progress)
+    elif st == 'jira':
+        return await fetch_jira_project(url, tokens.get('JIRA_API_TOKEN'), config=config, on_progress=on_progress)
+    elif st == 'upload':
+        return await process_uploaded_file(url, config=config, on_progress=on_progress)
+    elif st in CONNECTOR_REGISTRY:
+        token_key = TOKEN_KEY_MAP.get(st)
+        token = tokens.get(token_key) if token_key else None
+        if not token and token_key:
+            from ...core.config import settings, get_env_var
+            token = get_env_var(token_key, getattr(settings, token_key, ""))
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            connector = get_connector(st, client)
+            if config is not None:
+                return await connector.ingest(url, token, config=config, on_progress=on_progress)
+            return await connector.ingest(url, token, on_progress=on_progress)
+    else:
+        raise ValueError(f"Unknown source type: {source_type}")
 
 async def check_source_updates(
     source_type: str,
@@ -90,4 +103,3 @@ async def check_source_updates(
     async with httpx.AsyncClient(timeout=45.0) as client:
         connector = get_connector(source_type, client)
         return await connector.check_incremental_updates(url, token, last_state=last_state, config=config)
-

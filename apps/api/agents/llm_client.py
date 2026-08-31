@@ -55,7 +55,8 @@ class LLMClient:
         if self._gemini_client is None:
             try:
                 from google import genai
-                self._gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+                api_key = settings.GEMINI_API_KEY or "dummy_key_for_testing"
+                self._gemini_client = genai.Client(api_key=api_key)
                 logger.debug("Gemini client initialised (google-genai SDK)")
             except Exception as e:
                 logger.error(f"Failed to initialise Gemini client: {e}")

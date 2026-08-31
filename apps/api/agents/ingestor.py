@@ -193,9 +193,18 @@ async def run_ingestor(context, sources: list = None, tokens: dict = None, log_c
             def _on_progress(event_name, data):
                 if log_callback:
                     try:
-                        loop = asyncio.get_event_loop()
+                        try:
+                            loop = asyncio.get_running_loop()
+                        except RuntimeError:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                        
                         if loop.is_running():
-                            asyncio.create_task(log_callback(event_name, data))
+                            loop.call_soon_threadsafe(
+                                lambda: asyncio.create_task(log_callback(event_name, data))
+                            )
+                        else:
+                            loop.run_until_complete(log_callback(event_name, data))
                     except Exception:
                         pass
 
