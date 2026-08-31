@@ -81,6 +81,7 @@ class LLMClient:
         force_json: bool = False,
         force_mode: ForceMode = None,
         num_ctx_override: Optional[int] = None,
+        images: Optional[list] = None,
     ) -> str:
         """Generate a response from the appropriate LLM.
 
@@ -93,11 +94,12 @@ class LLMClient:
             force_mode:       Override AI_MODE for this call ("local" or "remote").
                               Essential for hybrid per-task routing.
             num_ctx_override: Ollama-only — override num_ctx for this call.
+            images:           List of image bytes (only supported for Gemini remote mode).
         """
         mode = self._effective_mode(force_mode)
         if mode == "local":
             return await self._generate_local(prompt, system, force_json, num_ctx_override)
-        return await self._generate_remote(prompt, system, force_json)
+        return await self._generate_remote(prompt, system, force_json, images)
 
     async def generate_batch(
         self,
@@ -109,7 +111,7 @@ class LLMClient:
 
         Args:
             items:           List of dicts. Required key: "prompt".
-                             Optional keys: "system", "force_json", "num_ctx_override".
+                             Optional keys: "system", "force_json", "num_ctx_override", "images".
             semaphore_limit: Max concurrent LLM calls.
             force_mode:      Passed through to every generate() call.
         """
@@ -131,6 +133,7 @@ class LLMClient:
                     force_json=item.get("force_json", False),
                     force_mode=force_mode,
                     num_ctx_override=item.get("num_ctx_override"),
+                    images=item.get("images"),
                 )
                 results.append(res)
                 if delay_seconds > 0:
@@ -152,6 +155,7 @@ class LLMClient:
                     force_json=item.get("force_json", False),
                     force_mode=force_mode,
                     num_ctx_override=item.get("num_ctx_override"),
+                    images=item.get("images"),
                 )
                 if effective_mode == "remote" and delay_seconds > 0:
                     await asyncio.sleep(delay_seconds)
@@ -176,7 +180,7 @@ class LLMClient:
         client = await self._get_ollama_client()
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
         num_ctx = num_ctx_override or 16384
-        model_name = get_env_var("GEMMA_MODEL", getattr(settings, "GEMMA_MODEL", "gemma4:12b"))
+        model_name = get_env_var("GEMMA_MODEL", getattr(settings, "GEMMA_MODEL", "gemma3:12b"))
 
         payload: dict = {
             "model": model_name,
@@ -211,6 +215,7 @@ class LLMClient:
         prompt: str,
         system: str,
         force_json: bool,
+        images: Optional[list] = None,
     ) -> str:
         """Call Gemini using the google-genai SDK via the natively-async client.aio interface."""
         import random
@@ -230,12 +235,29 @@ class LLMClient:
         if force_json:
             config_kwargs["response_mime_type"] = "application/json"
         config = types.GenerateContentConfig(**config_kwargs)
+        
+        contents = [prompt]
+        if images:
+            for img_bytes in images:
+                # We assume png for raw bytes, or let genai auto-detect if possible
+                contents.append(
+                    types.Part.from_bytes(data=img_bytes, mime_type='image/png')
+                )
 
+        backup_model_name = get_env_var("GEMINI_BACKUP_MODEL", getattr(settings, "GEMINI_BACKUP_MODEL", None))
+        
         for attempt in range(5):
+            current_model = model_name
+            # Fall back to backup model immediately after 1 failure to avoid 15s proxy timeouts
+            if attempt >= 1 and backup_model_name:
+                current_model = backup_model_name
+                if attempt == 1:
+                    logger.info(f"[llm_client/remote] Primary model '{model_name}' failed. Immediately falling back to backup model: '{current_model}'")
+                    
             try:
                 response = await client.aio.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
+                    model=current_model,
+                    contents=contents,
                     config=config,
                 )
                 return response.text or ""
@@ -244,11 +266,10 @@ class LLMClient:
                 is_rate_limit = any(tok in err_str for tok in ("429", "RESOURCE_EXHAUSTED", "quota"))
                 is_transient  = any(tok in err_str for tok in ("503", "UNAVAILABLE", "DNS", "timeout"))
                 if (is_rate_limit or is_transient) and attempt < 4:
-                    # Jittered exponential backoff: avoids thundering herd on quota reset
-                    base_wait = 12 * (2 ** attempt) if is_rate_limit else 5 * (attempt + 1)
-                    wait = base_wait + random.uniform(1.0, 5.0)
+                    base_wait = 4 * (2 ** attempt) if is_rate_limit else 2 * (attempt + 1)
+                    wait = base_wait + random.uniform(0.5, 2.0)
                     logger.warning(
-                        f"Gemini {'rate limit (429)' if is_rate_limit else 'transient error'} (attempt {attempt+1}/5), "
+                        f"Gemini {'rate limit (429)' if is_rate_limit else 'transient error'} on '{current_model}' (attempt {attempt+1}/5), "
                         f"backing off for {wait:.1f}s: {e}"
                     )
                     await asyncio.sleep(wait)

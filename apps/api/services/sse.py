@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, Dict, List
+from typing import AsyncGenerator, Dict, List, Optional
 import json
 
 class SSEManager:
@@ -31,3 +31,14 @@ class SSEManager:
                 yield f"data: {json.dumps(event)}\n\n"
         except asyncio.CancelledError:
             await self.unsubscribe(kb_id, queue)
+
+
+_global_sse_manager: Optional[SSEManager] = None
+
+
+def get_sse_manager() -> SSEManager:
+    """Get or create the global singleton SSEManager."""
+    global _global_sse_manager
+    if _global_sse_manager is None:
+        _global_sse_manager = SSEManager()
+    return _global_sse_manager

@@ -3,7 +3,10 @@ packages/
 ref_code/
 demo-codebase/
 .env
+.env.*
 .env.example
+apps/web/.env
+apps/web/.env.*
 logdir/
 *.log
 .DS_Store
@@ -33,7 +36,9 @@ skills-lock.json
 
 scripts/
 output/
+scratch/
 deploy_gcp.sh
 gcp-key.json
 setup_gcp_infra.sh
 apps/celerybeat-schedule.db
+*.env

@@ -73,6 +73,24 @@ def download_from_gcs(gcs_uri: str) -> str:
     return blob.download_as_text(encoding="utf-8")
 
 
+def download_bytes_from_gcs(gcs_uri: str) -> bytes:
+    """Download content from a gs:// URI as bytes."""
+    client = get_gcs_client()
+    if not client:
+        raise RuntimeError("GCS client is not available")
+
+    if not gcs_uri.startswith("gs://"):
+        raise ValueError(f"Invalid GCS URI: {gcs_uri}")
+
+    parts = gcs_uri[5:].split("/", 1)
+    bucket_name = parts[0]
+    blob_name = parts[1]
+
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    return blob.download_as_bytes()
+
+
 def gcs_blob_exists(kb_id: str, filename: str) -> bool:
     """Check if a blob exists in GCS."""
     client = get_gcs_client()

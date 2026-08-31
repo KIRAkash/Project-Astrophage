@@ -19,3 +19,4 @@ google-adk
 google-cloud-storage
 sse-starlette
 greenlet
+markitdown

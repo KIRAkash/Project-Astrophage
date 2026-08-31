@@ -50,6 +50,21 @@ def download_content(path: str) -> str:
             return f.read()
     raise ValueError(f"Invalid storage path: {path}")
 
+def download_content_bytes(path: str) -> bytes:
+    """Download content from a gs:// or local:// URI as bytes."""
+    if path.startswith("gs://"):
+        from .gcs_storage import download_bytes_from_gcs
+        return download_bytes_from_gcs(path)
+    if path.startswith("local://"):
+        file_path = path[8:]
+        with open(file_path, "rb") as f:
+            return f.read()
+    # Treat plain filesystem path as local
+    if os.path.isfile(path):
+        with open(path, "rb") as f:
+            return f.read()
+    raise ValueError(f"Invalid storage path: {path}")
+
 def content_exists(kb_id: str, filename: str) -> bool:
     """Check if content exists in GCS or local disk."""
     if is_gcs_enabled():

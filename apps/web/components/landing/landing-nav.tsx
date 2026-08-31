@@ -33,26 +33,14 @@ export function LandingNav() {
     >
       <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
         {/* Logo */}
-        <a href="/" className="flex items-center gap-3 group">
-          <div className="relative w-9 h-9 rounded-full bg-gradient-to-tr from-[#7928CA] to-[#00D2FF] p-[1.5px] shadow-[0_0_15px_rgba(0,210,255,0.4)] group-hover:shadow-[0_0_25px_rgba(0,210,255,0.7)] transition-shadow">
-            <div className="w-full h-full rounded-full bg-[#070B19] flex items-center justify-center p-1.5">
-              <Image
-                src="/assets/logos/logo.svg"
-                alt="Astrophage Emblem"
-                width={24}
-                height={24}
-                className="w-full h-full object-contain filter drop-shadow-[0_0_8px_rgba(0,210,255,0.8)]"
-              />
-            </div>
-          </div>
-          <div className="flex flex-col">
-            <span className="font-space font-extrabold text-white tracking-widest text-lg leading-tight">
-              ASTROPHAGE
-            </span>
-            <span className="font-mono text-[9px] uppercase tracking-[0.25em] text-cyan">
-              OPENKB FABRIC
-            </span>
-          </div>
+        <a href="/" className="flex items-center group transition-opacity hover:opacity-80">
+          <Image
+            src="/assets/logos/lockup-wordmark-white.svg"
+            alt="Astrophage"
+            width={200}
+            height={48}
+            className="h-12 w-auto object-contain"
+          />
         </a>
 
         {/* Desktop nav */}

@@ -40,7 +40,7 @@ async def get_kb(kb_id: str, db: AsyncSession = Depends(get_db)):
 async def sync_kb_status(kb_id: str, db: AsyncSession = Depends(get_db)):
     from ..db.models import KBStatus, KBEvent
     from ..services.gitops import get_github_client
-    from ..workers.tasks import rollup_pipeline_task
+    from ..workers.dispatcher import dispatch_rollup_pipeline
     try:
         val = UUID(kb_id)
     except ValueError:
@@ -80,16 +80,16 @@ async def sync_kb_status(kb_id: str, db: AsyncSession = Depends(get_db)):
                 org_result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.org_id == kb.org_id, KnowledgeBase.status == KBStatus.published))
                 published_kbs = org_result.scalars().all()
                 if len(published_kbs) >= 2:
-                    rollup_pipeline_task.delay(str(kb.org_id))
+                    dispatch_rollup_pipeline(str(kb.org_id))
 
     return kb
 
 @router.post("/api/kb/{kb_id}/check-updates")
 async def check_kb_updates(kb_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Inspect all configured sources (GitHub, Confluence, Notion, Slack, Jira) for updates and trigger Gatekeeper pipeline."""
-    from ..workers.tasks import gatekeeper_pipeline_task
+    from ..workers.dispatcher import dispatch_gatekeeper_pipeline
     from ..db.models import SourceMonitor, MonitorMode
-    from ..agents.runner import log_event, run_gatekeeper_pipeline
+    from ..agents.runner import log_event
     from ..services.source_ingestion import check_source_updates
     from datetime import datetime
 
@@ -184,35 +184,18 @@ async def check_kb_updates(kb_id: str, request: Request, db: AsyncSession = Depe
                         "message": f"Detected changes from {delta.source_type.upper()}: {delta.summary}",
                     })
 
-                # Trigger Gatekeeper Pipeline
-                try:
-                    gatekeeper_pipeline_task.delay(
-                        kb_id=str(kb.id),
-                        diff=delta.delta_content,
-                        source_type=delta.source_type,
-                        source_url=delta.source_url,
-                        commit_sha=delta.new_state.get("last_commit_sha") or delta.new_state.get("latest_ts"),
-                        commit_message=delta.summary,
-                        affected_items=delta.affected_items,
-                        author=delta.author,
-                        summary=delta.summary,
-                    )
-                except Exception:
-                    # Async fallback
-                    if sse_manager:
-                        asyncio.create_task(run_gatekeeper_pipeline(
-                            kb_id=str(kb.id),
-                            diff=delta.delta_content,
-                            db=db,
-                            sse=sse_manager,
-                            commit_sha=delta.new_state.get("last_commit_sha") or delta.new_state.get("latest_ts"),
-                            commit_message=delta.summary,
-                            source_type=delta.source_type,
-                            source_url=delta.source_url,
-                            affected_items=delta.affected_items,
-                            author=delta.author,
-                            summary=delta.summary,
-                        ))
+                # Trigger Gatekeeper Pipeline via unified dispatcher
+                dispatch_gatekeeper_pipeline(
+                    kb_id=str(kb.id),
+                    diff=delta.delta_content,
+                    source_type=delta.source_type,
+                    source_url=delta.source_url,
+                    commit_sha=delta.new_state.get("last_commit_sha") or delta.new_state.get("latest_ts"),
+                    commit_message=delta.summary,
+                    affected_items=delta.affected_items,
+                    author=delta.author,
+                    summary=delta.summary,
+                )
 
                 triggered_count += 1
                 scan_results.append({
@@ -253,7 +236,8 @@ async def check_kb_updates(kb_id: str, request: Request, db: AsyncSession = Depe
 
 @router.get("/api/kb/{kb_id}/stream")
 async def kb_stream(kb_id: str, request: Request):
-    sse_manager = request.app.state.sse_manager
+    from ..services.sse import get_sse_manager
+    sse_manager = getattr(request.app.state, "sse_manager", None) or get_sse_manager()
     queue = await sse_manager.subscribe(str(kb_id))
     
     async def event_publisher():
@@ -305,7 +289,8 @@ async def restart_kb(kb_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(kb)
     
-    generation_pipeline_task.delay(str(kb.id))
+    from ..workers.dispatcher import dispatch_generation_pipeline
+    dispatch_generation_pipeline(str(kb.id))
     
     result = await db.execute(
         select(KnowledgeBase).options(
@@ -345,7 +330,8 @@ async def retry_kb(kb_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(kb)
     
-    generation_pipeline_task.delay(str(kb.id))
+    from ..workers.dispatcher import dispatch_generation_pipeline
+    dispatch_generation_pipeline(str(kb.id))
     
     result = await db.execute(
         select(KnowledgeBase).options(
@@ -630,7 +616,8 @@ async def add_source_to_kb(kb_id: str, request: Request, db: AsyncSession = Depe
     await db.refresh(kb)
     
     # Trigger Pipeline Task
-    add_source_pipeline_task.delay(str(kb.id), new_source_dict)
+    from ..workers.dispatcher import dispatch_add_source_pipeline
+    dispatch_add_source_pipeline(str(kb.id), new_source_dict)
     
     return {
         "status": "pipeline_started",
@@ -804,3 +791,69 @@ async def check_diff_constraints(kb_id: str, request: Request, db: AsyncSession 
         "total_constraints_evaluated": len(constraints),
         "violations": violations,
     }
+
+@router.post("/api/kb/{kb_id}/chat")
+async def chat_with_kb(kb_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Chat with the architecture KB."""
+    from ..services.local_storage import load_checkpoint_json
+    from ..agents.llm_client import llm_client
+    
+    body = await request.json()
+    prompt = body.get("prompt", "")
+    
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Missing 'prompt' field")
+        
+    try:
+        val = UUID(kb_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="KB not found")
+        
+    # Get the compiled files
+    compiled_files = load_checkpoint_json(kb_id, "compiled_files.json") or {}
+    if not compiled_files:
+        raise HTTPException(status_code=404, detail="Compiled KB not found")
+        
+    # Construct the system context
+    system_prompt = "You are an expert architecture assistant as part of Project Astrophage. Answer the user's questions directly based ONLY on the following knowledge base files:\n\n"
+    for file_path, content in compiled_files.items():
+        if file_path.endswith(".md"):
+            system_prompt += f"--- {file_path} ---\n{content}\n\n"
+            
+    system_prompt += "If the answer is not in the provided documents, say so. Be concise and accurate."
+    try:
+        response = await llm_client.generate(prompt=prompt, system=system_prompt, force_mode="remote")
+    except Exception as e:
+        logger.error(f"LLM API Error during chat: {e}")
+        error_msg = str(e)
+        if "503" in error_msg or "UNAVAILABLE" in error_msg:
+            return {"response": "The AI model is currently experiencing high demand (503). Please try again in a few moments."}
+        elif "429" in error_msg or "quota" in error_msg.lower():
+            return {"response": "The AI model quota has been exceeded (429). Please try again later."}
+        else:
+            return {"response": f"An error occurred while communicating with the AI model: {error_msg}"}
+            
+    return {"response": response}
+
+@router.get("/api/kb/{kb_id}/export-skill")
+async def export_kb_skill(kb_id: str, db: AsyncSession = Depends(get_db)):
+    """Export the KB as a single XML block for AI context."""
+    from ..services.local_storage import load_checkpoint_json
+    try:
+        val = UUID(kb_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="KB not found")
+        
+    compiled_files = load_checkpoint_json(kb_id, "compiled_files.json") or {}
+    if not compiled_files:
+        raise HTTPException(status_code=404, detail="Compiled KB not found")
+        
+    xml_output = "<architecture_context>\n"
+    for file_path, content in compiled_files.items():
+        if file_path.endswith(".md"):
+            xml_output += f"  <file path=\"{file_path}\">\n"
+            xml_output += f"    <![CDATA[\n{content}\n    ]]>\n"
+            xml_output += f"  </file>\n"
+    xml_output += "</architecture_context>"
+    
+    return {"skill_prompt": xml_output}

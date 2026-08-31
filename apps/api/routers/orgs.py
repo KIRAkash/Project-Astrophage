@@ -8,7 +8,7 @@ import uuid
 from ..db.database import get_db
 from ..db.models import Org, KnowledgeBase
 from ..db.schemas import OrgCreate, OrgResponse, OrgTreeNode, KBCreate, KBResponse
-from ..workers.tasks import generation_pipeline_task
+from ..workers.dispatcher import dispatch_generation_pipeline
 
 router = APIRouter(prefix="/api/orgs", tags=["Organizations"])
 
@@ -100,6 +100,6 @@ async def create_app_kb(org_id: str, kb: KBCreate, db: AsyncSession = Depends(ge
     await db.commit()
     await db.refresh(new_kb)
     
-    generation_pipeline_task.delay(str(new_kb.id))
+    dispatch_generation_pipeline(str(new_kb.id))
     
     return new_kb

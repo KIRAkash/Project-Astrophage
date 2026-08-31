@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import re
-
+from typing import Optional
 from ..core.config import settings
 from ..services.source_ingestion import ingest_source
 from ..services.local_storage import upload_content, load_kb_content
@@ -16,7 +16,8 @@ SYSTEM_SUMMARISER = (
 
 SYSTEM_REDUCER = (
     "You are a senior software architect. Synthesise a coherent architectural "
-    "overview from the per-file summaries provided."
+    "overview from the per-file summaries provided. "
+    "If you receive any images/diagrams alongside the text, carefully analyze their content, components, and data flows, and incorporate those insights into your final architectural synthesis."
 )
 
 
@@ -131,7 +132,7 @@ async def _map_chunks_remote(chunks: list, log_callback=None) -> list:
 # Reduce phase — synthesise all summaries into architecture index
 # ---------------------------------------------------------------------------
 
-async def _reduce_summaries(summaries: list, force_mode=None) -> str:
+async def _reduce_summaries(summaries: list, force_mode=None, images: Optional[list] = None) -> str:
     """Combine per-chunk summaries into a coherent architecture index."""
     joined = "\n\n".join(summaries)
     prompt = (
@@ -141,7 +142,7 @@ async def _reduce_summaries(summaries: list, force_mode=None) -> str:
         "Do NOT repeat individual file summaries — produce a concise narrative.\n\n"
         f"Summaries:\n{joined}"
     )
-    return await llm_client.generate(prompt=prompt, system=SYSTEM_REDUCER, force_mode=force_mode)
+    return await llm_client.generate(prompt=prompt, system=SYSTEM_REDUCER, force_mode=force_mode, images=images)
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +229,18 @@ async def run_ingestor(context, sources: list = None, tokens: dict = None, log_c
             "message": "Analyzing application structure, interfaces, and architecture"
         })
 
+    # Extract base64 images from raw_content if any
+    import base64
+    extracted_images = []
+    def _extract_image_payload(match):
+        try:
+            extracted_images.append(base64.b64decode(match.group(1)))
+        except:
+            pass
+        return "[IMAGE UPLOADED AND ATTACHED FOR VISION]"
+        
+    raw_content = re.sub(r'<astrophage_image_payload base64="([^"]+)"\s*/>', _extract_image_payload, raw_content)
+
     # ── Mode-specific map-reduce ──────────────────────────────────────────────
 
     if mode == "remote" and len(raw_content) <= settings.REMOTE_INLINE_THRESHOLD:
@@ -250,6 +263,7 @@ async def run_ingestor(context, sources: list = None, tokens: dict = None, log_c
             ),
             system=SYSTEM_REDUCER,
             force_mode="remote",
+            images=extracted_images if extracted_images else None,
         )
 
     else:
@@ -278,7 +292,7 @@ async def run_ingestor(context, sources: list = None, tokens: dict = None, log_c
 
         # REDUCE
         logger.info(f"[REDUCE/{reduce_mode}] Synthesising {len(summaries)} chunk summaries...")
-        architecture_index = await _reduce_summaries(summaries, force_mode=reduce_mode)
+        architecture_index = await _reduce_summaries(summaries, force_mode=reduce_mode, images=extracted_images if extracted_images else None)
 
     # Archive the index
     try:

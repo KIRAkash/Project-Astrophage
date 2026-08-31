@@ -1,0 +1,13 @@
+.gcloudignore
+.git
+.gitignore
+node_modules/
+.next/
+*.log
+.DS_Store
+logdir/
+apps/video/
+demo-codebase/
+ref_code/
+packages/
+apps/api/.venv/

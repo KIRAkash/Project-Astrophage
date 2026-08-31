@@ -4,7 +4,14 @@ import asyncio
 import httpx
 
 from .base import BaseConnector, IngestionError
-from ..local_storage import download_content
+from ..local_storage import download_content, download_content_bytes
+import os
+import tempfile
+
+try:
+    from markitdown import MarkItDown
+except ImportError:
+    MarkItDown = None
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +33,29 @@ class FileUploadConnector(BaseConnector):
                 pass
 
         try:
-            content = await asyncio.to_thread(download_content, url)
+            ext = os.path.splitext(url.split('?')[0])[1].lower()
+            supported_exts = {".docx", ".pptx", ".xlsx", ".csv", ".html"}
+            image_exts = {".png", ".jpg", ".jpeg", ".webp", ".heic"}
+            
+            if ext in image_exts:
+                raw_bytes = await asyncio.to_thread(download_content_bytes, url)
+                import base64
+                b64 = base64.b64encode(raw_bytes).decode('utf-8')
+                content = f"![Uploaded Architecture Diagram]({url})\n<astrophage_image_payload base64=\"{b64}\" />"
+            elif ext in supported_exts and MarkItDown is not None:
+                raw_bytes = await asyncio.to_thread(download_content_bytes, url)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                    tmp.write(raw_bytes)
+                    tmp_path = tmp.name
+                
+                try:
+                    md = MarkItDown()
+                    result = await asyncio.to_thread(md.convert, tmp_path)
+                    content = result.text_content
+                finally:
+                    os.unlink(tmp_path)
+            else:
+                content = await asyncio.to_thread(download_content, url)
         except Exception as e:
             raise IngestionError(f"Error processing uploaded file: {str(e)}")
 

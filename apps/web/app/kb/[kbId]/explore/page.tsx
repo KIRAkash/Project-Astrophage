@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import Link from 'next/link';
-import { FileText, Folder, ChevronRight, ChevronDown, ArrowLeft, ExternalLink, Compass } from 'lucide-react';
+import { FileText, Folder, ChevronRight, ChevronDown, ArrowLeft, ExternalLink, Compass, Code2, MessageSquare, Send, Bot, User, Loader2 } from 'lucide-react';
 import { NebulaCard } from '@/components/space/nebula-card';
 import { KnowledgeBase } from '@/types/kb';
 
@@ -26,21 +26,21 @@ type FileTree = {
 // Function to build tree from flat list
 const buildTree = (nodes: TreeNode[], activePath?: string | null): FileTree[] => {
   const root: FileTree[] = [];
-  
+
   if (!nodes || !Array.isArray(nodes)) return root;
 
   nodes.forEach(node => {
     const parts = node.path.split('/');
     let currentLevel = root;
-    
+
     parts.forEach((part, index) => {
       let existingPath = currentLevel.find(item => item.name === part);
-      
+
       const isLeaf = index === parts.length - 1;
       const type = isLeaf ? node.type : 'tree';
       const nodePath = isLeaf ? node.path : parts.slice(0, index + 1).join('/');
       const isParentOfActive = activePath ? activePath.startsWith(nodePath + '/') : false;
-      
+
       if (existingPath) {
         if (existingPath.type === 'tree' && !existingPath.children) {
           existingPath.children = [];
@@ -66,7 +66,7 @@ const buildTree = (nodes: TreeNode[], activePath?: string | null): FileTree[] =>
       }
     });
   });
-  
+
   return root;
 };
 
@@ -97,6 +97,11 @@ export default function ExploreKBPage({ params }: { params: { kbId: string } }) 
   const [allKBs, setAllKBs] = useState<KnowledgeBase[]>([]);
   const [targetAnchor, setTargetAnchor] = useState<string | null>(null);
 
+  const [showChat, setShowChat] = useState(false);
+  const [messages, setMessages] = useState<{ role: 'user' | 'bot', content: string }[]>([]);
+  const [input, setInput] = useState('');
+  const [loadingChat, setLoadingChat] = useState(false);
+
   // Load all KBs in the organization to resolve cross-KB links
   useEffect(() => {
     api.listKBs()
@@ -112,7 +117,7 @@ export default function ExploreKBPage({ params }: { params: { kbId: string } }) 
         const fileToOpen = initialFileParam || 'index.md';
         const fileExists = data.tree.some(t => t.path === fileToOpen);
         const resolvedInitial = fileExists ? fileToOpen : (data.tree.find(t => t.path.endsWith('.md'))?.path || null);
-        
+
         setTree(buildTree(data.tree, resolvedInitial));
         setLoadingTree(false);
 
@@ -141,9 +146,9 @@ export default function ExploreKBPage({ params }: { params: { kbId: string } }) 
       const hash = targetAnchor || window.location.hash.replace(/^#/, '');
       if (hash) {
         setTimeout(() => {
-          const el = document.getElementById(hash) || 
-                     document.getElementById(decodeURIComponent(hash)) ||
-                     document.getElementById(slugify(hash));
+          const el = document.getElementById(hash) ||
+            document.getElementById(decodeURIComponent(hash)) ||
+            document.getElementById(slugify(hash));
           if (el) {
             el.scrollIntoView({ behavior: 'smooth', block: 'start' });
             el.classList.add('bg-orbit/20', 'transition-colors', 'duration-1000');
@@ -157,7 +162,7 @@ export default function ExploreKBPage({ params }: { params: { kbId: string } }) 
   const loadFile = (path: string, anchor?: string) => {
     const cleanPath = path.split('#')[0].trim().replace(/^\.\//, '');
     const finalPath = (!cleanPath.endsWith('.md') && !cleanPath.includes('.')) ? `${cleanPath}.md` : cleanPath;
-    
+
     setSelectedFile(finalPath);
     setLoadingFile(true);
     setFileContent(null);
@@ -251,6 +256,33 @@ export default function ExploreKBPage({ params }: { params: { kbId: string } }) 
     }
   };
 
+  const sendMessage = async () => {
+    if (!input.trim() || loadingChat) return;
+
+    const userMessage = input.trim();
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setInput('');
+    setLoadingChat(true);
+
+    try {
+      const historyStr = messages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
+      const fullPrompt = historyStr ? `History:\n${historyStr}\n\nUser: ${userMessage}` : userMessage;
+
+      const res = await fetch(`/api/kb/${params.kbId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: fullPrompt }),
+      });
+
+      const data = await res.json();
+      setMessages(prev => [...prev, { role: 'bot', content: data.response || 'No response.' }]);
+    } catch (err) {
+      setMessages(prev => [...prev, { role: 'bot', content: 'Error communicating with the architecture assistant.' }]);
+    } finally {
+      setLoadingChat(false);
+    }
+  };
+
   const renderTree = (nodes: FileTree[]) => {
     return (
       <ul className="pl-4 space-y-1">
@@ -310,7 +342,7 @@ export default function ExploreKBPage({ params }: { params: { kbId: string } }) 
         const strippedTarget = cleanTarget.replace(/^(?:ap|kb):/, '');
         return `[${label}](#cross:${strippedTarget}${anchorSuffix})`;
       }
-      
+
       // Internal link: #internal:path#anchor
       return `[${label}](#internal:${cleanTarget}${anchorSuffix})`;
     });
@@ -330,6 +362,32 @@ export default function ExploreKBPage({ params }: { params: { kbId: string } }) 
             OpenKB Explorer
           </span>
           <h1 className="text-2xl font-space font-bold text-white">Explore Knowledge Base</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowChat(!showChat)}
+            className={`px-4 py-2 rounded-lg font-mono text-sm flex items-center gap-2 transition-all shadow-[0_0_10px_rgba(245,158,11,0.15)] ${showChat
+                ? 'bg-amber-500 text-white font-bold border-transparent'
+                : 'bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-400'
+              }`}
+          >
+            <MessageSquare className="w-4 h-4" /> {showChat ? 'Close Chat' : 'Chat'}
+          </button>
+          <button
+            onClick={async () => {
+              const res = await fetch(`/api/kb/${params.kbId}/export-skill`);
+              const data = await res.json();
+              const blob = new Blob([data.skill_prompt], { type: 'text/xml' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `astrophage-skill-export.xml`;
+              a.click();
+            }}
+            className="bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-400 px-4 py-2 rounded-lg font-mono text-sm flex items-center gap-2 transition-all shadow-[0_0_10px_rgba(168,85,247,0.15)]"
+          >
+            <Code2 className="w-4 h-4" /> Export Context
+          </button>
         </div>
       </div>
 
@@ -482,6 +540,83 @@ export default function ExploreKBPage({ params }: { params: { kbId: string } }) 
             </div>
           )}
         </div>
+
+        {showChat && (
+          <div className="w-[400px] shrink-0 h-full flex flex-col">
+            <div className="glass-card hover:border-stellar/50 hover:shadow-[0_0_20px_rgba(6,182,212,0.3)] transition-all duration-300 h-full flex flex-col">
+              <div className="p-6 border-b border-white/5 shrink-0">
+                <h3 className="text-xl font-space font-semibold text-white"> Astro Assistant</h3>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                {messages.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-gray-500 font-mono text-sm text-center px-4">
+                    Send a message to start chatting with your architecture.
+                  </div>
+                ) : (
+                  messages.map((msg, i) => (
+                    <div key={i} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      {msg.role === 'bot' && (
+                        <div className="w-8 h-8 rounded-full bg-orbit/20 border border-orbit/40 flex items-center justify-center shrink-0">
+                          <Bot className="w-4 h-4 text-orbit" />
+                        </div>
+                      )}
+                      <div className={`p-4 rounded-xl max-w-[80%] font-mono text-xs ${msg.role === 'user'
+                          ? 'bg-stellar/20 border border-stellar/40 text-stellar-light whitespace-pre-wrap'
+                          : 'bg-white/5 border border-white/10 text-gray-300'
+                        }`}>
+                        {msg.role === 'bot' ? (
+                          <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-headings:text-white prose-a:text-orbit prose-strong:text-white">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {msg.content}
+                            </ReactMarkdown>
+                          </div>
+                        ) : (
+                          msg.content
+                        )}
+                      </div>
+                      {msg.role === 'user' && (
+                        <div className="w-8 h-8 rounded-full bg-stellar/20 border border-stellar/40 flex items-center justify-center shrink-0">
+                          <User className="w-4 h-4 text-stellar" />
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+                {loadingChat && (
+                  <div className="flex gap-4 justify-start">
+                    <div className="w-8 h-8 rounded-full bg-orbit/20 border border-orbit/40 flex items-center justify-center shrink-0">
+                      <Bot className="w-4 h-4 text-orbit" />
+                    </div>
+                    <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-gray-300 flex items-center">
+                      <Loader2 className="w-4 h-4 animate-spin text-orbit" />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 border-t border-white/10 shrink-0 bg-[#0a0a0f] rounded-b-xl">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                    placeholder="Ask about this KB..."
+                    className="flex-1 bg-black/40 border border-white/20 rounded-lg px-3 py-2 font-mono text-sm focus:outline-none focus:border-stellar transition-colors text-white"
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={!input.trim() || loadingChat}
+                    className="bg-stellar hover:bg-stellar/90 text-black px-3 py-2 rounded-lg font-bold flex items-center gap-2 transition-colors disabled:opacity-50"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

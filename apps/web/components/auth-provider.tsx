@@ -21,9 +21,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => {
+    const publicPaths = ['/login', '/'];
+    const isPublicPath = publicPaths.includes(pathname) || pathname.startsWith('/api/');
+
     if (!auth) {
       setLoading(false);
-      if (pathname !== '/login') {
+      if (!isPublicPath) {
         router.push('/login');
       }
       return;
@@ -34,7 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       
       // Enforce authentication
-      if (!currentUser && pathname !== '/login') {
+      if (!currentUser && !isPublicPath) {
         router.push('/login');
       }
     });
@@ -50,8 +53,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // If we're not logged in and not on the login page, don't render children yet to prevent flashing content
-  if (!user && pathname !== '/login') {
+  // If we're not logged in and not on a public page, don't render children yet to prevent flashing content
+  const publicPaths = ['/login', '/'];
+  const isPublicPath = publicPaths.includes(pathname) || pathname.startsWith('/api/');
+  
+  if (!user && !isPublicPath) {
     return null; 
   }
 

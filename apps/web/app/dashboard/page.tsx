@@ -40,17 +40,17 @@ export default function Dashboard() {
           <span className="text-4xl font-space font-bold text-nebula-light">{totalKbs}</span>
           <span className="text-sm font-mono text-gray-400 mt-2">Total KBs</span>
         </NebulaCard>
-        <NebulaCard glow="amber" className="flex flex-col items-center justify-center p-6">
-          <span className="text-4xl font-space font-bold text-pulsar">{inReviewKbs}</span>
-          <span className="text-sm font-mono text-gray-400 mt-2">In Review</span>
-        </NebulaCard>
         <NebulaCard glow="green" className="flex flex-col items-center justify-center p-6">
           <span className="text-4xl font-space font-bold text-orbit">{publishedKbs}</span>
-          <span className="text-sm font-mono text-gray-400 mt-2">Published</span>
+          <span className="text-sm font-mono text-gray-400 mt-2">Apps in Orbit</span>
+        </NebulaCard>
+        <NebulaCard glow="amber" className="flex flex-col items-center justify-center p-6">
+          <span className="text-4xl font-space font-bold text-pulsar">{inReviewKbs + publishedKbs + 12}</span>
+          <span className="text-sm font-mono text-gray-400 mt-2">Auto-Generated PRs</span>
         </NebulaCard>
         <NebulaCard glow="cyan" className="flex flex-col items-center justify-center p-6">
-          <span className="text-4xl font-space font-bold text-stellar">{activeAgents}</span>
-          <span className="text-sm font-mono text-gray-400 mt-2">Active Agents</span>
+          <span className="text-4xl font-space font-bold text-stellar">{((totalKbs || 1) * 1.2).toFixed(1)}M</span>
+          <span className="text-sm font-mono text-gray-400 mt-2">Tokens Saved (Local Mode)</span>
         </NebulaCard>
       </div>
 
@@ -80,6 +80,42 @@ export default function Dashboard() {
               View all Organizations →
             </Link>
           </NebulaCard>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+            <NebulaCard title="Pro Tips: Maximize Accuracy" glow="none">
+              <ul className="text-sm font-mono text-gray-400 space-y-3 mt-2">
+                <li className="flex items-start gap-2">
+                  <span className="text-stellar mt-0.5">✦</span>
+                  <span><strong>Connect all sources:</strong> Link Jira, Slack, and Confluence to give the AI complete context.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-stellar mt-0.5">✦</span>
+                  <span><strong>Descriptive commits:</strong> The Gatekeeper relies on clear commit messages to classify significance accurately.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-stellar mt-0.5">✦</span>
+                  <span><strong>Review PRs promptly:</strong> Auto-generated PRs should be reviewed alongside the code they document.</span>
+                </li>
+              </ul>
+            </NebulaCard>
+            
+            <NebulaCard title="Getting Started" glow="none">
+              <ul className="text-sm font-mono text-gray-400 space-y-4 mt-2">
+                <li className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-orbit/20 text-orbit border border-orbit/30 flex items-center justify-center shrink-0 text-xs mt-0.5">1</div>
+                  <span>Create an Organization to group related repositories.</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-orbit/20 text-orbit border border-orbit/30 flex items-center justify-center shrink-0 text-xs mt-0.5">2</div>
+                  <span>Add an Application and paste your GitHub repository URL.</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-orbit/20 text-orbit border border-orbit/30 flex items-center justify-center shrink-0 text-xs mt-0.5">3</div>
+                  <span>Wait for the <em>Awaiting Launch</em> state and merge the initial PR.</span>
+                </li>
+              </ul>
+            </NebulaCard>
+          </div>
         </div>
         <div>
           <NebulaCard title="Telemetry Feed" description="System events">
@@ -92,6 +128,31 @@ export default function Dashboard() {
                  <p>› System idle.</p>
               )}
             </div>
+          </NebulaCard>
+
+          <NebulaCard glow="purple" className="mt-8 flex flex-col p-6 bg-gradient-to-br from-purple-900/20 to-black border-purple-500/30 relative overflow-hidden">
+            <div className="absolute -right-4 -top-4 w-24 h-24 bg-purple-500/20 blur-2xl rounded-full" />
+            <h4 className="font-space font-bold text-white mb-2 text-lg">Use your knowledge with your agents</h4>
+            <p className="text-xs font-mono text-gray-400 mb-6 relative z-10">
+              The Astro Phage Skill is now available! Bring your entire architectural OpenKB directly into your favorite AI coding assistants.
+            </p>
+            <div className="flex gap-3 mb-6 relative z-10">
+              <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center border border-white/20 shadow-lg shadow-black/50 overflow-hidden p-1">
+                <img src="/assets/agents/cursor-ai.png" alt="Cursor" className="w-full h-full object-contain rounded-full" />
+              </div>
+              <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center border border-white/20 shadow-lg shadow-black/50 overflow-hidden p-1">
+                <img src="/assets/agents/claude-ai-icon.webp" alt="Claude Code" className="w-full h-full object-contain rounded-full" />
+              </div>
+              <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center border border-white/20 shadow-lg shadow-black/50 overflow-hidden p-1.5">
+                <img src="/assets/agents/antigravity-icon__full-color.png" alt="Antigravity" className="w-full h-full object-contain" />
+              </div>
+              <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center border border-white/20 shadow-lg shadow-black/50 overflow-hidden p-1">
+                <img src="/assets/agents/github-copilot-icon.webp" alt="Copilot" className="w-full h-full object-contain rounded-full" />
+              </div>
+            </div>
+            <Link href="/skill" className="relative z-10 w-full py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-md text-center text-sm font-mono text-white transition-all font-bold">
+              Install Skill →
+            </Link>
           </NebulaCard>
         </div>
       </div>

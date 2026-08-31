@@ -8,20 +8,13 @@ export function LandingFooter() {
           {/* Brand Column */}
           <div className="space-y-4 max-w-sm">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#7928CA] to-[#00D2FF] p-[1px] flex items-center justify-center">
-                <div className="w-full h-full rounded-full bg-[#070B19] flex items-center justify-center p-1">
-                  <Image
-                    src="/assets/logos/logo.svg"
-                    alt="Astrophage Logo"
-                    width={20}
-                    height={20}
-                    className="w-full h-full object-contain"
-                  />
-                </div>
-              </div>
-              <span className="font-space font-extrabold text-white tracking-widest text-lg">
-                ASTROPHAGE
-              </span>
+              <Image
+                src="/assets/logos/lockup-wordmark-white.svg"
+                alt="Astrophage Logo"
+                width={150}
+                height={24}
+                className="h-6 w-auto object-contain"
+              />
             </div>
             <p className="text-xs text-zinc-400 font-mono leading-relaxed">
               OpenKB: Autonomous Multi-KB Knowledge Fabric for enterprise architecture and AI code agents.

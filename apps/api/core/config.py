@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # ── Gemini (Remote) ───────────────────────────────────────────────────────
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_BACKUP_MODEL: Optional[str] = "gemini-2.0-flash"
 
     # ── Gemma / Ollama (Local) ────────────────────────────────────────────────
     GEMMA_OLLAMA_URL: str = "http://localhost:11434"
@@ -70,6 +71,7 @@ class Settings(BaseSettings):
     GCS_BUCKET_NAME: str = "astrophage-kbs"
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
     REDIS_URL: str = "redis://localhost:6379/0"
+    WORKER_MODE: str = "auto"                          # "auto", "celery", or "in_process"
     SOURCE_MONITOR_MODE: str = "webhook"
     WEBHOOK_SECRET: str = "supersecret"
     NEXTAUTH_SECRET: str = "supersecret"

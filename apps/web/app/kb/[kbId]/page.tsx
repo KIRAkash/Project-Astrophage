@@ -202,8 +202,8 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
             </a>
           )}
           {currentStatus === 'published' && (
-            <Link href={`/kb/${kb.id}/explore`} className="bg-orbit/20 hover:bg-orbit/30 border border-orbit/40 text-orbit px-4 py-2 rounded-lg font-mono text-sm flex items-center gap-2 transition-all shadow-[0_0_10px_rgba(16,185,129,0.15)]">
-              <FileText className="w-4 h-4" /> Explore Knowledge Base
+            <Link href={`/kb/${kb.id}/explore`} className="bg-orbit/20 hover:bg-orbit/30 border border-orbit/40 text-orbit px-6 py-3 rounded-xl font-mono text-base flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] font-bold scale-110">
+              <FileText className="w-5 h-5" /> Explore
             </Link>
           )}
         </div>
@@ -272,6 +272,20 @@ export default function KBDetailPage({ params }: { params: { kbId: string } }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-8">
+          {/* Architecture Map Placeholder */}
+          <NebulaCard title="Architecture Dependency Graph" glow="cyan">
+            <div className="relative h-64 w-full rounded-lg overflow-hidden border border-white/10 bg-[#0a0a0f] flex items-center justify-center">
+              <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at center, #38bdf8 2px, transparent 2px)', backgroundSize: '30px 30px' }} />
+              <div className="z-10 text-center space-y-3 p-6 bg-black/40 rounded-xl border border-white/20 backdrop-blur-md max-w-sm mx-auto">
+                <div className="w-12 h-12 rounded-full bg-stellar/20 flex items-center justify-center mx-auto mb-2 border border-stellar/30">
+                  <span className="text-xl">🕸️</span>
+                </div>
+                <h3 className="font-space font-bold text-white text-lg">Interactive Map Coming Soon</h3>
+                <p className="font-mono text-xs text-gray-400">The 3D Dependency Graph is currently rendering. You'll soon be able to visualize cross-repo data flows here.</p>
+              </div>
+            </div>
+          </NebulaCard>
+
           {/* Status Timeline */}
           <NebulaCard title="Deployment Trajectory" glow={currentStatus === 'published' ? 'green' : currentStatus === 'failed' ? 'red' : 'purple'}>
             <div className="flex justify-between items-center relative py-4">

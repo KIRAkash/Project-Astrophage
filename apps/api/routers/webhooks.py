@@ -5,7 +5,7 @@ from ..core.security import validate_github_webhook_signature
 from ..core.config import settings
 from ..db.database import get_db
 from ..db.models import SourceMonitor, KnowledgeBase, Org, KBStatus
-from ..workers.tasks import gatekeeper_pipeline_task, rollup_pipeline_task
+from ..workers.dispatcher import dispatch_gatekeeper_pipeline, dispatch_rollup_pipeline
 from ..services.gitops import get_commit_diff
 import logging
 
@@ -27,6 +27,12 @@ async def handle_github_push(
     repo_url = payload['repository']['html_url']
     after_sha = payload['after']
     
+    # Only process pushes to main or master branch
+    ref = payload.get('ref', '')
+    if ref not in ('refs/heads/main', 'refs/heads/master'):
+        logger.info(f"Ignoring push to non-main branch: {ref}")
+        return {"status": "ignored_branch"}
+    
     result = await db.execute(select(SourceMonitor).where(
         (SourceMonitor.repo_url == repo_url) | (SourceMonitor.source_url == repo_url)
     ))
@@ -36,7 +42,7 @@ async def handle_github_push(
         if not monitor.incremental_enabled:
             continue
         diff = get_commit_diff(payload['repository']['full_name'], after_sha)
-        gatekeeper_pipeline_task.delay(
+        dispatch_gatekeeper_pipeline(
             kb_id=str(monitor.kb_id),
             diff=diff,
             source_type="github",
@@ -76,7 +82,7 @@ async def handle_github_pr(
             published_kbs = org_result.scalars().all()
             
             if len(published_kbs) >= 2:
-                rollup_pipeline_task.delay(str(kb.org_id))
+                dispatch_rollup_pipeline(str(kb.org_id))
 
     return {"status": "accepted"}
 
@@ -112,7 +118,7 @@ async def handle_slack_events(request: Request, db: AsyncSession = Depends(get_d
             cfg_channel = (mon.config or {}).get("channel_id") or mon.target_url
             if channel in cfg_channel or mon.target_url.endswith(channel):
                 diff_text = f"### 💬 Real-time Slack Message from #{channel}\n\n**{user}**: {text}\n"
-                gatekeeper_pipeline_task.delay(
+                dispatch_gatekeeper_pipeline(
                     kb_id=str(mon.kb_id),
                     diff=diff_text,
                     source_type="slack",
@@ -147,7 +153,7 @@ async def handle_confluence_webhook(request: Request, db: AsyncSession = Depends
                 continue
             if space_key in mon.target_url or (mon.config or {}).get("space_key") == space_key:
                 diff_text = f"### 📄 Confluence Webhook Event\nSpace: `{space_key}`\nPage: `{page_title}` (ID: {page_id})\nEvent: `{payload.get('eventType', 'page_updated')}`"
-                gatekeeper_pipeline_task.delay(
+                dispatch_gatekeeper_pipeline(
                     kb_id=str(mon.kb_id),
                     diff=diff_text,
                     source_type="confluence",

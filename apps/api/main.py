@@ -11,7 +11,7 @@ logging.basicConfig(
 logger = logging.getLogger("astrophage")
 
 from .db.database import init_db
-from .services.sse import SSEManager
+from .services.sse import SSEManager, get_sse_manager
 from .routers import orgs, kb, webhooks
 from .services.source_ingestion.base import IngestionError, IngestionAuthError, IngestionRateLimitError
 
@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     
     # Init SSE Manager
-    app.state.sse_manager = SSEManager()
+    app.state.sse_manager = get_sse_manager()
     
     yield
 
