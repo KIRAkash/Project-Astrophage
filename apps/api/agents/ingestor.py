@@ -268,7 +268,8 @@ async def run_ingestor(context, sources: list = None, tokens: dict = None, log_c
 
     else:
         # ── Map-Reduce path ─────────────────────────────────────────────────
-        chunk_size = settings.LOCAL_CHUNK_SIZE if mode in ("local", "hybrid") else 15000
+        # Use a much larger chunk size for Gemini to minimize concurrent API calls
+        chunk_size = settings.LOCAL_CHUNK_SIZE if mode in ("local", "hybrid") else 500000
         chunks = _chunk_by_files(raw_content, chunk_size)
         logger.info(f"Chunked codebase into {len(chunks)} chunks (chunk_size={chunk_size}, mode={mode})")
 

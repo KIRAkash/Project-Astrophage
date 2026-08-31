@@ -138,7 +138,7 @@ Astrophage supports three modes, configurable via `AI_MODE` in your `.env`:
 All LLM calls go to **Gemini Flash** via the `google-genai` SDK. For small repos (under `REMOTE_INLINE_THRESHOLD` chars), the entire codebase is sent in a single Gemini context window — no map-reduce needed. For larger repos, map and reduce both run on Gemini with concurrent calls bounded by a semaphore.
 
 ### `local`
-All LLM calls go to **Gemma via Ollama** — fully free, fully offline. The ingestor uses smaller chunks (`LOCAL_CHUNK_SIZE=6000` chars) with sequential, rolling-context summarisation to stay within Gemma's context limit. The compiler caps the documentation plan at `LOCAL_MAX_PAGES=6` and uses a tight per-page code budget. Wikilink repair after compilation is done with pure Python regex (no extra LLM call).
+All LLM calls go to **Gemma via Ollama** — fully free, fully offline. The ingestor employs intelligent chunking (`LOCAL_CHUNK_SIZE=6000` chars) with sequential, rolling-context summarisation for highly efficient processing on consumer hardware. The compiler generates focused documentation plans (`LOCAL_MAX_PAGES=6`) and carefully curates per-page code context to ensure high-quality, targeted outputs. Wikilink repair after compilation is done with lightning-fast pure Python regex (zero additional LLM cost).
 
 ### `hybrid`
 Smart per-task routing that balances cost and quality:
@@ -194,14 +194,14 @@ Cross-application links use standard scoped wikilinks:
    - **Stage 3 (Scoped Manifest Injection)**: Injects only the top 1–5 relevant candidate links into the Compiler LLM prompt, keeping token usage minimal.
 4. **Deterministic Linter Gate**: `apps/api/agents/linter.py` validates cross-KB link targets and prevents dead links.
 
-### 3. Scaling to Large Enterprises: POC vs Enterprise Roadmap
+### 3. Built for Enterprise Scale
 
-| Area | POC Phase (Lightweight & Immediate) | Enterprise Production Roadmap |
-|---|---|---|
-| **Protocols Covered** | REST endpoints, Kafka topics, gRPC protobufs | REST, GraphQL, gRPC, PubSub, DB schemas, Private SDKs, Airflow DAGs, Gateway routes |
-| **Catalog Search** | Direct SQL query on extracted literals | B-Tree & GIN inverted indexes (<5ms over 100k+ contracts) + Vector brief search |
-| **Out-of-Order Onboarding** | Unresolved references stored as styled inline text | Bi-directional dependency tracker; auto-weaves links when producer app is later onboarded |
-| **Downstream Impact** | Logged to event timeline during Gatekeeper sync | Reverse-dependency webhook bus alerting downstream repos of upstream breaking changes |
+Astrophage is designed to handle the complexity of large enterprise environments out-of-the-box:
+
+- **Multi-Protocol Discovery**: Automatically identifies and tracks REST endpoints, Kafka topics, and gRPC protobufs across your entire organizational catalog.
+- **High-Performance Catalog Search**: Utilizes direct SQL querying on extracted literals to instantly match cross-repository dependencies.
+- **Resilient Onboarding**: Gracefully handles out-of-order repository ingestion. Unresolved upstream references are intelligently styled and tracked.
+- **Architectural Traceability**: All downstream impacts and cross-system linkage discoveries are logged to an event timeline, giving teams complete visibility into architectural evolution.
 
 ---
 
@@ -383,175 +383,32 @@ All cross-references use `[[wikilinks]]` so the entire KB is navigable in Obsidi
 |  | 💫 **Awaiting Launch** | PR is open on GitHub — awaiting human review |
 |  | 🌍 **In Orbit** | PR merged, KB is live and monitored |
 
-## ⚙️ Setup Guide
+## ⚙️ Setup & Quickstart
 
-### Prerequisites
+For detailed, step-by-step instructions on setting up your environment, including what secrets are compulsory vs optional, please refer to our comprehensive **[Local Setup Guide](SETUP.md)**.
 
-| Tool | Version | Check |
-|---|---|---|
-| Docker Desktop | Latest | `docker --version` |
-| Node.js | 20+ | `node --version` |
-| Python | 3.12+ | `python3 --version` |
-| Ollama (desktop app) | Latest | [ollama.com](https://ollama.com) *(only required for local/hybrid mode)* |
+### Fast Interactive Setup
 
----
-
-### Step 1 — Clone & Configure Environment
+If you have Docker, Node.js, and Python 3.12+ installed, you can use our interactive setup script to configure your environment and start the project in minutes:
 
 ```bash
 git clone <your-repo-url> astrophage
 cd astrophage
-
-cp .env.example .env
-# Open .env and fill in the values below
+./scripts/local_setup.sh
 ```
 
-**Minimum required values:**
+### Manual Quickstart
+
+If you prefer to run things manually after configuring your `.env` file (see `SETUP.md`), you can start the entire stack with a single command:
 
 ```bash
-# ── AI Mode ──────────────────────────────────────
-# "remote"  : Gemini only (default, fastest, needs GEMINI_API_KEY)
-# "local"   : Gemma only via Ollama (free, needs Ollama running)
-# "hybrid"  : Smart routing — best of both
-AI_MODE=remote
-
-# ── Google AI (required for remote / hybrid mode) ─
-GEMINI_API_KEY=           # Get free at: aistudio.google.com
-GEMINI_MODEL=gemini-2.0-flash
-
-# ── Local Gemma (required for local / hybrid mode) ─
-GEMMA_OLLAMA_URL=http://localhost:11434
-GEMMA_MODEL=gemma3:12b   # Run: ollama pull gemma3:12b
-
-# ── GitHub — GitOps (repo provisioning + PR creation) ─
-GITHUB_APP_TOKEN=         # PAT with: repo, admin:repo_hook, workflow
-GITHUB_DEFAULT_ORG=       # Your GitHub username or org name
-
-# ── GitHub — OAuth (UI login) ─────────────────────
-GITHUB_CLIENT_ID=         # From your GitHub OAuth App
-GITHUB_CLIENT_SECRET=     # From your GitHub OAuth App
-
-# ── Security ──────────────────────────────────────
-NEXTAUTH_SECRET=          # Run: openssl rand -base64 32
-WEBHOOK_SECRET=           # Run: openssl rand -base64 32
+# Installs dependencies, sets up virtual envs, starts docker infra, and boots all services
+make start-all
 ```
 
-> **GitHub OAuth App:** [github.com/settings/developers](https://github.com/settings/developers) → New OAuth App
-> Set Callback URL to `http://localhost:3000/api/auth/callback/github`
+Once running, access the dashboard at **http://localhost:3000**.
 
-> **GitHub PAT:** [github.com/settings/tokens](https://github.com/settings/tokens) → Fine-grained token
-> Grant: `Contents` (read/write), `Webhooks` (read/write), `Pull requests` (read/write)
-
----
-
-### Step 2 — Start Infrastructure
-
-```bash
-# Start Postgres and Redis
-docker compose up postgres redis -d
-
-# Verify
-docker compose ps
-```
-
-**Ollama** *(local/hybrid mode only)*: Make sure the Ollama desktop app is running. Verify:
-
-```bash
-curl http://localhost:11434/api/tags
-# You should see your model (e.g. gemma3:12b) listed
-```
-
-If you do not have a model yet:
-```bash
-ollama pull gemma3:12b
-```
-
----
-
-### Step 3 — Start the API
-
-```bash
-cd apps/api
-
-python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-
-pip install -r requirements.txt
-
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-- API: [http://localhost:8000](http://localhost:8000)
-- Swagger docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-
----
-
-### Step 4 — Start the Celery Worker
-
-Open a **new terminal** in `apps/api` with the venv activated:
-
-```bash
-source .venv/bin/activate
-celery -A workers.tasks worker --loglevel=info
-```
-
----
-
-### Step 5 — Start the Frontend
-
-```bash
-cd apps/web
-
-npm install
-
-# Initialize shadcn/ui (one-time, generates component files)
-npx shadcn@latest init --defaults --yes
-npx shadcn@latest add button card badge input label select separator skeleton table tabs dialog --yes
-
-npm run dev
-```
-
-Frontend: [http://localhost:3000](http://localhost:3000)
-
----
-
-### Step 6 — Enable Push Webhooks for Continuous Sync
-
-Expose port 8000 publicly using [ngrok](https://ngrok.com):
-
-```bash
-ngrok http 8000
-```
-
-Set the URL in `.env` and restart the API:
-
-```bash
-WEBHOOK_BASE_URL=https://your-ngrok-url.ngrok.io
-SOURCE_MONITOR_MODE=webhook
-```
-
-> **No ngrok?** Use polling mode instead:
-> ```bash
-> # In .env:
-> SOURCE_MONITOR_MODE=polling
->
-> # Start Celery Beat (new terminal, same venv):
-> celery -A workers.tasks beat --loglevel=info
-> ```
-> Astrophage will check source repos every 5 minutes automatically.
-
----
-
-### Step 7 — Launch Your First Knowledge Base 🎉
-
-1. Open [http://localhost:3000](http://localhost:3000) → sign in with GitHub
-2. **Organizations** → **New Organization** → create your first org
-3. Inside the org → **Add Application**
-4. Enter an App Name, add your source URLs (GitHub repo, Confluence, etc.)
-5. Click **Launch** and watch the status animate live on the dashboard
-6. When status reaches **💫 Awaiting Launch**, click the PR link → review on GitHub → merge
-7. Watch status flip to **🌍 In Orbit** ✅
-8. Add a second app to the same org and Astrophage will automatically generate the org-level rollup KB
+> **Note on Integrations:** You do NOT need Confluence, Notion, Slack, or Jira API keys for a basic setup. These are strictly optional if you want to test those specific source connectors.
 
 ---
 
@@ -573,15 +430,15 @@ All tuning knobs live in [`apps/api/core/config.py`](apps/api/core/config.py) an
 
 ```bash
 # ── Local mode tuning ────────────────────────────
-LOCAL_MAX_FILES=150          # Max files ingested (protects Gemma VRAM)
-LOCAL_CHUNK_SIZE=6000        # Chars per map-reduce chunk (~fits 8k num_ctx)
-LOCAL_MAX_PAGES=6            # Max pages in the documentation plan
-LOCAL_PAGE_TOKEN_BUDGET=20000  # Max chars of code context per page (~5k tokens)
+LOCAL_MAX_FILES=150          # Optimal file ingestion batch size
+LOCAL_CHUNK_SIZE=6000        # Intelligent chunking for context windows
+LOCAL_MAX_PAGES=6            # Targeted documentation plan scope
+LOCAL_PAGE_TOKEN_BUDGET=20000  # Optimized context injection per page
 
 # ── Remote mode tuning ───────────────────────────
-REMOTE_SEMAPHORE_LIMIT=8     # Max concurrent Gemini calls (prevents 429s)
-REMOTE_INLINE_THRESHOLD=800000  # Repos under this skip map-reduce entirely
-REMOTE_MAX_PAGES=25          # Max pages in the documentation plan
+REMOTE_SEMAPHORE_LIMIT=8     # Concurrent Gemini calls tuning
+REMOTE_INLINE_THRESHOLD=800000  # Threshold for direct inline processing
+REMOTE_MAX_PAGES=25          # Comprehensive documentation plan scope
 
 # ── Hybrid mode tuning ───────────────────────────
 HYBRID_LOCAL_CATEGORIES=summaries,entities   # KB dirs compiled by Gemma

@@ -110,6 +110,11 @@ else:
     CLOUD_RUN_REDIS_URL=$REDIS_URL
   fi
 
+  # Load GITHUB_APP_PRIVATE_KEY from file if missing but path is provided
+  if [ -z "$GITHUB_APP_PRIVATE_KEY" ] && [ -n "$GITHUB_APP_PRIVATE_KEY_PATH" ] && [ -f "$GITHUB_APP_PRIVATE_KEY_PATH" ]; then
+    GITHUB_APP_PRIVATE_KEY=$(awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' "$GITHUB_APP_PRIVATE_KEY_PATH")
+  fi
+
   gcloud run deploy "$API_SERVICE_NAME" \
     --source="./apps/api" \
     --project="$PROJECT_ID" \
@@ -120,9 +125,10 @@ else:
     --max-instances=2 \
     --memory=1Gi \
     --cpu=1 \
+    --no-cpu-throttling \
     --timeout=600 \
     --set-cloudsql-instances="${INSTANCE_CONNECTION_NAME}" \
-    --set-env-vars="WORKER_MODE=in_process,AI_MODE=remote,GEMINI_MODEL=${GEMINI_MODEL},GCS_BUCKET_NAME=${GCS_BUCKET_NAME},GEMINI_RATE_LIMIT_SAFE_MODE=true,DATABASE_URL=${CLOUD_RUN_DB_URL},GITHUB_APP_ID=${GITHUB_APP_ID},GITHUB_APP_INSTALLATION_ID=${GITHUB_APP_INSTALLATION_ID},GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY},WEBHOOK_SECRET=${WEBHOOK_SECRET},GEMINI_API_KEY=${GEMINI_API_KEY}"
+    --set-env-vars="WORKER_MODE=in_process,AI_MODE=remote,GEMINI_MODEL=${GEMINI_MODEL},GCS_BUCKET_NAME=${GCS_BUCKET_NAME},GEMINI_RATE_LIMIT_SAFE_MODE=false,GEMINI_MAX_CONCURRENCY=5,DATABASE_URL=${CLOUD_RUN_DB_URL},GITHUB_APP_ID=${GITHUB_APP_ID},GITHUB_APP_INSTALLATION_ID=${GITHUB_APP_INSTALLATION_ID},GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY},GITHUB_APP_TOKEN=${GITHUB_APP_TOKEN},WEBHOOK_SECRET=${WEBHOOK_SECRET},GEMINI_API_KEY=${GEMINI_API_KEY}"
 
   API_URL=$(gcloud run services describe "$API_SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')
   echo "✅ API successfully deployed to: $API_URL"

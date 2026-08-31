@@ -229,6 +229,7 @@ class LLMClient:
         config_kwargs: dict = {
             "automatic_function_calling": types.AutomaticFunctionCallingConfig(disable=True),
             "max_output_tokens": 8192,
+            "service_tier": "PRIORITY",  # Explicitly request the priority lane for paid tiers
         }
         if system:
             config_kwargs["system_instruction"] = system
@@ -266,11 +267,12 @@ class LLMClient:
                 is_rate_limit = any(tok in err_str for tok in ("429", "RESOURCE_EXHAUSTED", "quota"))
                 is_transient  = any(tok in err_str for tok in ("503", "UNAVAILABLE", "DNS", "timeout"))
                 if (is_rate_limit or is_transient) and attempt < 4:
-                    base_wait = 4 * (2 ** attempt) if is_rate_limit else 2 * (attempt + 1)
+                    # Apply exponential backoff with jitter for BOTH rate limits and 503 overloads
+                    base_wait = (2 ** attempt) if is_transient else 4 * (2 ** attempt)
                     wait = base_wait + random.uniform(0.5, 2.0)
                     logger.warning(
-                        f"Gemini {'rate limit (429)' if is_rate_limit else 'transient error'} on '{current_model}' (attempt {attempt+1}/5), "
-                        f"backing off for {wait:.1f}s: {e}"
+                        f"Gemini {'rate limit (429)' if is_rate_limit else 'transient error (503/timeout)'} on '{current_model}' (attempt {attempt+1}/5), "
+                        f"backing off exponentially for {wait:.1f}s: {e}"
                     )
                     await asyncio.sleep(wait)
                 else:

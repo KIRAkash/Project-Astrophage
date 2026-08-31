@@ -17,11 +17,16 @@ def _load_private_key() -> str:
     key_path = getattr(settings, "GITHUB_APP_PRIVATE_KEY_PATH", None)
     if key_path:
         p = Path(key_path)
+        if not p.is_absolute() and not p.is_file():
+            # Fallback to resolving relative to the project root
+            from ..core.config import _ROOT_DIR
+            p = _ROOT_DIR / key_path
+            
         if p.is_file():
             try:
                 return p.read_text(encoding="utf-8")
             except Exception as e:
-                logger.error(f"Failed to read GitHub App private key at {key_path}: {e}")
+                logger.error(f"Failed to read GitHub App private key at {p}: {e}")
     return ""
 
 def get_github_client(installation_id: Optional[int] = None) -> Github:
@@ -118,21 +123,25 @@ def provision_kb_repo(org_slug: str, app_name: str, github_org: str = None) -> s
     
     if owner is not None:
         try:
-            repo = owner.create_repo(name=repo_name, private=True, auto_init=True)
+            repo = owner.create_repo(name=repo_name, private=False, auto_init=True)
             logger.info(f"Provisioned new KB repository: {repo.html_url}")
             return repo.html_url
         except GithubException as e:
-            logger.info(f"Repository {repo_name} already exists or create failed ({e}), attempting to fetch existing repo...")
+            logger.warning(f"Repository {repo_name} create failed or already exists ({e.status}: {e.data}). Attempting to fetch existing...")
             try:
                 repo = owner.get_repo(repo_name)
                 return repo.html_url
-            except Exception:
-                pass
+            except Exception as fetch_err:
+                logger.error(f"Failed to fetch existing repo {repo_name} after create failed: {fetch_err}")
 
     # Direct lookup fallback via repo full name
     full_name = f"{target_org}/{repo_name}"
-    repo = g.get_repo(full_name)
-    return repo.html_url
+    try:
+        repo = g.get_repo(full_name)
+        return repo.html_url
+    except GithubException as e:
+        logger.error(f"Failed to find or create repository {full_name}. Are GitHub credentials missing or invalid on Cloud Run?")
+        raise RuntimeError(f"GitHub Provisioning Failed: Cannot find or create repository '{full_name}'. Ensure GITHUB_APP_TOKEN or Private Key is configured correctly in the deployment.") from e
 
 
 def commit_kb_to_branch(repo_full_name: str, branch_name: str, kb_files: dict[str, str]):
